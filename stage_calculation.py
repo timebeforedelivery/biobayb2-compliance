@@ -36,11 +36,11 @@ def calculate_daily_wear_from_uh(participantidentifier, first_w1_day, first_week
     src AS (
     SELECT
         pid,
-        CAST(from_iso8601_timestamp(object_day_start_timestamp_iso8601) AS date) AS day_date,
+        CAST(from_iso8601_timestamp(object_day_start_timestamp_iso8601_tz) AS date) AS day_date,
         object_values_timestamp
     FROM temp
     WHERE pid = '{participantidentifier}'
-        AND object_day_start_timestamp_iso8601 IS NOT NULL
+        AND object_day_start_timestamp_iso8601_tz IS NOT NULL
     ),
     day_counts AS (
     SELECT
