@@ -19,14 +19,88 @@ from sensorfabric.athena import athena
 mdh = MDH()
 
 mdh_athena = Needle(method="mdh")
+
 aws_athena = aws = athena(
     profile_name=os.getenv("AWS_PROFILE_NAME"),
     database=os.getenv('AWS_BIOBAYB_DB_NAME'),
     s3_location=os.getenv('AWS_BIOBAYB_S3_LOCATION'),
     workgroup=os.getenv('AWS_BIOBAYB_WORKGROUP'),
-    offlineCache=True,
+    offlineCache=False,
 )
 
+
+def calculate_daily_wear_from_oura(participantidentifier, first_week, last_week):
+    query = f"""
+    WITH edd AS (
+    SELECT
+        participantidentifier,
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final
+    FROM allparticipants
+    WHERE participantidentifier = '{participantidentifier}'
+    ),
+    w1 AS (
+    SELECT
+        participantidentifier,
+        CAST(edd_final AS date) - INTERVAL '280' DAY AS w1_date
+    FROM edd
+    WHERE edd_final IS NOT NULL
+    ),
+    oura_days AS (
+    SELECT
+        participantidentifier,
+        CAST("timestamp" AS date) AS day_date,
+        -- Clamp to [0,1] and ensure floating math
+        GREATEST(0.0, LEAST(1.0, 1.0 - CAST(COALESCE(nonweartime, 0) AS DOUBLE) / 86400.0)) AS wear_fraction
+    FROM ouradailyactivity
+    WHERE participantidentifier = '{participantidentifier}'
+    ),
+    wear_flags AS (
+    SELECT
+        participantidentifier,
+        day_date,
+        CASE WHEN wear_fraction >= 0.75 THEN 1 ELSE 0 END AS wear_day_flag
+    FROM oura_days
+    ),
+    days_with_week AS (
+    SELECT
+        wf.participantidentifier,
+        wf.day_date,
+        1 + CAST(date_diff('day', w.w1_date, wf.day_date) / 7 AS integer) AS ga_week,
+        wf.wear_day_flag
+    FROM wear_flags wf
+    JOIN w1 w
+        ON w.participantidentifier = wf.participantidentifier
+    ),
+    weekly_sums AS (
+    SELECT
+        participantidentifier,
+        ga_week AS week,
+        SUM(wear_day_flag) AS wear_days_ge_75
+    FROM days_with_week
+    WHERE ga_week BETWEEN {first_week} AND {last_week}
+    GROUP BY 1, 2
+    ),
+    weeks AS (
+    SELECT
+        w1.participantidentifier,
+        CAST(week AS integer) AS week
+    FROM w1
+    CROSS JOIN UNNEST(sequence({first_week}, {last_week})) AS t(week)
+    )
+    SELECT
+    w.participantidentifier,
+    w.week,
+    COALESCE(ws.wear_days_ge_75, 0) AS wear_days_ge_75
+    FROM weeks w
+    JOIN w1
+    ON w1.participantidentifier = w.participantidentifier
+    LEFT JOIN weekly_sums ws
+    ON ws.participantidentifier = w.participantidentifier
+    AND ws.week = w.week
+    ORDER BY w.week
+    """
+    result = mdh_athena.execQuery(query)
+    return [int(i) for i in result['wear_days_ge_75'].tolist()]
 
 def calculate_daily_wear_from_uh(participantidentifier, first_w1_day, first_week, last_week):
     query = f"""
@@ -585,27 +659,29 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     return [int(i) for i in result['meets_2x'].tolist()]
 
 
-def show_heatmap_for_stage(participant_email, participantidentifier, first_week, last_week, title, w1):
+def show_heatmap_for_stage(participant_email, participantidentifier, first_week, last_week, title, w1, ring_vendor='uh'):
     weeks = [f"W{w}" for w in range(first_week, last_week + 1)]
 
     frame = {
         "Symptom check-in (daily)": calculate_daily_symptoms(participantidentifier, first_week, last_week),
         "Daily questions (1-5 Q)": calculate_daily_questions(participantidentifier, first_week, last_week),
         "Weekly/bimonthly questionnaire": calculate_weekly_bimontly_surveys(participantidentifier, first_week, last_week),
-        "Smart ring wear (~19h/day)": np.zeros(len(weeks)), # To be filled
         "Weight(per week)": calculate_weight_measurements(participantidentifier, first_week, last_week),
         "BP (per week)": calculate_bp_measurements(participantidentifier, first_week, last_week)
     }
 
-    if os.getenv('UH_API_CALL'):
-        # Calculate device wear for each week
-        for i, week_num in enumerate(range(first_week, last_week + 1)):
-            # Calculate the start date of the week (w1 is the start of week 1)
-            week_start = w1 + timedelta(days=(week_num - 1) * 7)
-            week_end = week_start + timedelta(days=6)
-            frame["Smart ring wear (~19h/day)"][i] = get_weekly_wear_count(participant_email, week_start, week_end)
+    if ring_vendor == 'oura':
+        frame["Oura - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_oura(participantidentifier, first_week, last_week) # from MDH
     else:
-        frame["Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh(participantidentifier, w1, first_week, last_week) # UH AWS
+        if os.getenv('UH_API_CALL'):
+            # Calculate device wear for each week
+            for i, week_num in enumerate(range(first_week, last_week + 1)):
+                # Calculate the start date of the week (w1 is the start of week 1)
+                week_start = w1 + timedelta(days=(week_num - 1) * 7)
+                week_end = week_start + timedelta(days=6)
+                frame["Smart ring wear (~19h/day)"][i] = get_weekly_wear_count(participant_email, week_start, week_end)
+        else:
+            frame["UH - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh(participantidentifier, w1, first_week, last_week) # UH AWS
 
     df = pd.DataFrame(frame, index=weeks).T
 
@@ -644,7 +720,9 @@ def show_percentage_heatmap_for_stage(frame, first_week, last_week, title):
                 else:
                     percentages.append(0)
             frame[key] = percentages
-        if key == "Smart ring wear (~19h/day)":
+        if key == "UH - Smart ring wear (~19h/day)":
+            frame[key] = [i/7 * 100 for i in value]
+        if key == "Oura - Smart ring wear (~19h/day)":
             frame[key] = [i/7 * 100 for i in value]
         if key == "Weight(per week)":
             percentages = []
@@ -668,8 +746,24 @@ def show_percentage_heatmap_for_stage(frame, first_week, last_week, title):
     biometrics_average = df.iloc[3:].sum(axis=0).astype(int) / 3
     df.loc["Self Report Average"] = self_report_average
     df.loc["Biometrics Average"] = biometrics_average
+
+
+    weekly_comp = (
+        (self_report_average >= 70).astype(int) * 3
+        + (biometrics_average >= 70).astype(int) * 4
+    )
+    df.loc["Weekly Compensation ($)"] = weekly_comp
+
+    # Prepare per-cell annotations: % for all rows except compensation (use $)
+    annot_labels = df.copy()
+    for row in df.index:
+        if row == "Weekly Compensation ($)":
+            annot_labels.loc[row] = annot_labels.loc[row].map(lambda v: f"${int(round(v))}")
+        else:
+            annot_labels.loc[row] = annot_labels.loc[row].map(lambda v: f"{float(v):.1f}%")
+
     # Plot heatmap
-    fig = plt.figure(figsize=(11, 4))
+    fig = plt.figure(figsize=(11, 5))
     ax = sns.heatmap(
         df,
         vmin=0,
@@ -677,12 +771,30 @@ def show_percentage_heatmap_for_stage(frame, first_week, last_week, title):
         cmap="YlGn",
         linewidths=0.5,
         linecolor="white",
-        annot=True,
-        fmt='.1f',
+        annot=annot_labels.values,
+        fmt='',
     )
     ax.set_title(title)
+
+    # Bold line before "Self Report Average"
+    try:
+        sep_y = df.index.get_loc("Self Report Average")
+        ax.hlines(sep_y, *ax.get_xlim(), colors="black", linewidth=2.8)
+    except KeyError:
+        pass
+
+
+    stage_total = int(weekly_comp.sum())
+    fig.subplots_adjust(top=10)
+    fig.subplots_adjust(bottom=9)  # make room for the caption
+    fig.text(
+        0.5, 0.0005,
+        f"Total compensation for this stage: ${stage_total}",
+        ha="center", va="bottom", fontsize=10, fontweight="bold"
+    )
+
     plt.tight_layout()
-    
+
     return fig
 
 def participant_first_w1_day(participantidentifier):
@@ -713,4 +825,3 @@ def participant_first_w1_day(participantidentifier):
     first_w1_day = result['w1'][0]
     format_string = '%Y-%m-%d %H:%M:%S.%f'
     return datetime.strptime(first_w1_day, format_string)
-
