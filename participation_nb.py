@@ -104,7 +104,7 @@ def _(mo):
 @app.cell
 def _(all_participants_data, mo, pd):
     dropdown = mo.ui.dropdown(
-        options=pd.DataFrame(all_participants_data['participants'])['participantIdentifier'], label="Choose a Participant ID", value="BB-4053-1232"
+        options=pd.DataFrame(all_participants_data['participants'])['participantIdentifier'], label="Choose a Participant ID", value="BB-4053-1232", searchable=True
     )
     dropdown
     return (dropdown,)
