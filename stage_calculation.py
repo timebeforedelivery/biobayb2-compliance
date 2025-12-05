@@ -477,6 +477,20 @@ def calculate_weight_measurements(participantidentifier, first_week, last_week):
     GROUP BY 1, 2
     ),
 
+    googlefit_wt_src AS (
+        SELECT
+            participantidentifier,
+            CAST(COALESCE(windowstart - INTERVAL '7' HOUR) AS date) AS day_date
+        FROM googlefitsamples
+        WHERE participantidentifier = '{participantidentifier}'
+        AND type = 'Weight'
+    ),
+    googlefit_wt_days AS (
+        SELECT participantidentifier, day_date
+        FROM googlefit_wt_src
+        GROUP BY 1, 2
+    ),
+
     wt_src AS (
     SELECT
         participantidentifier,
@@ -522,6 +536,14 @@ def calculate_weight_measurements(participantidentifier, first_week, last_week):
     JOIN w1 w
         ON w.participantidentifier = wtd.participantidentifier
     ),
+    googlefit_wt_with_weeks AS (
+    SELECT
+        wtd.participantidentifier,
+        1 + CAST(date_diff('day', w.w1_date, wtd.day_date) / 7 AS integer) AS ga_week
+    FROM googlefit_wt_days wtd
+    JOIN w1 w
+        ON w.participantidentifier = wtd.participantidentifier
+    ),
 
     bp_weekly AS (
     SELECT participantidentifier, ga_week AS week, COUNT(*) AS bp_days_in_week
@@ -532,6 +554,12 @@ def calculate_weight_measurements(participantidentifier, first_week, last_week):
     wt_weekly AS (
     SELECT participantidentifier, ga_week AS week, COUNT(*) AS weight_days_in_week
     FROM wt_with_weeks
+    WHERE ga_week BETWEEN {first_week} AND {last_week}
+    GROUP BY 1, 2
+    ),
+    googlefit_wt_weekly AS (
+    SELECT participantidentifier, ga_week AS week, COUNT(*) AS weight_days_in_week
+    FROM googlefit_wt_with_weeks
     WHERE ga_week BETWEEN {first_week} AND {last_week}
     GROUP BY 1, 2
     ),
@@ -547,7 +575,7 @@ def calculate_weight_measurements(participantidentifier, first_week, last_week):
     SELECT
     w.participantidentifier,
     w.week,
-    COALESCE(ww.weight_days_in_week, 0) AS meets_2x
+    COALESCE(ww.weight_days_in_week, gw.weight_days_in_week, 0) AS meets_2x
     FROM weeks w
     LEFT JOIN bp_weekly bw
     ON bw.participantidentifier = w.participantidentifier
@@ -555,6 +583,9 @@ def calculate_weight_measurements(participantidentifier, first_week, last_week):
     LEFT JOIN wt_weekly ww
     ON ww.participantidentifier = w.participantidentifier
     AND ww.week = w.week
+    LEFT JOIN googlefit_wt_weekly gw
+    ON gw.participantidentifier = w.participantidentifier
+    AND gw.week = w.week
     ORDER BY w.week;
     """
     result = mdh_athena.execQuery(query)
@@ -572,6 +603,20 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     bp_days AS (
     SELECT participantidentifier, day_date
     FROM bp_src
+    GROUP BY 1, 2
+    ),
+
+    googlefit_bp_src AS (
+        SELECT
+            participantidentifier,
+            CAST(COALESCE(windowstart - INTERVAL '7' HOUR) AS date) AS day_date
+        FROM googlefitsamples
+        WHERE participantidentifier = '{participantidentifier}'
+        AND (type = 'blood_presure_diastolic' OR type = 'blood_pressure_systolic')
+    ),
+    googlefit_bp_days AS (
+    SELECT participantidentifier, day_date
+    FROM googlefit_bp_src
     GROUP BY 1, 2
     ),
 
@@ -620,6 +665,14 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     JOIN w1 w
         ON w.participantidentifier = wtd.participantidentifier
     ),
+    googlefit_bp_with_weeks AS (
+    SELECT
+        gbp.participantidentifier,
+        1 + CAST(date_diff('day', w.w1_date, gbp.day_date) / 7 AS integer) AS ga_week
+    FROM googlefit_bp_days gbp
+    JOIN w1 w
+        ON w.participantidentifier = gbp.participantidentifier
+    ),
 
     bp_weekly AS (
     SELECT participantidentifier, ga_week AS week, COUNT(*) AS bp_days_in_week
@@ -630,6 +683,12 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     wt_weekly AS (
     SELECT participantidentifier, ga_week AS week, COUNT(*) AS weight_days_in_week
     FROM wt_with_weeks
+    WHERE ga_week BETWEEN {first_week} AND {last_week}
+    GROUP BY 1, 2
+    ),
+    googlefit_bp_weekly AS (
+    SELECT participantidentifier, ga_week AS week, COUNT(*) AS bp_days_in_week
+    FROM googlefit_bp_with_weeks
     WHERE ga_week BETWEEN {first_week} AND {last_week}
     GROUP BY 1, 2
     ),
@@ -645,7 +704,7 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     SELECT
     w.participantidentifier,
     w.week,
-    GREATEST(COALESCE(ww.weight_days_in_week, 0), COALESCE(bw.bp_days_in_week, 0)) AS meets_2x
+    GREATEST(COALESCE(ww.weight_days_in_week, 0), COALESCE(bw.bp_days_in_week, 0), COALESCE(gb.bp_days_in_week, 0)) AS meets_2x
     FROM weeks w
     LEFT JOIN bp_weekly bw
     ON bw.participantidentifier = w.participantidentifier
@@ -653,9 +712,13 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     LEFT JOIN wt_weekly ww
     ON ww.participantidentifier = w.participantidentifier
     AND ww.week = w.week
+    LEFT JOIN googlefit_bp_weekly gb
+    ON gb.participantidentifier = w.participantidentifier
+    AND gb.week = w.week
     ORDER BY w.week;
     """
     result = mdh_athena.execQuery(query)
+    print([int(i) for i in result['meets_2x'].tolist()])
     return [int(i) for i in result['meets_2x'].tolist()]
 
 
