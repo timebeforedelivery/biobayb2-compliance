@@ -718,7 +718,6 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     ORDER BY w.week;
     """
     result = mdh_athena.execQuery(query)
-    print([int(i) for i in result['meets_2x'].tolist()])
     return [int(i) for i in result['meets_2x'].tolist()]
 
 
