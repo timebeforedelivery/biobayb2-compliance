@@ -612,7 +612,7 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
             CAST(COALESCE(windowstart - INTERVAL '7' HOUR) AS date) AS day_date
         FROM googlefitsamples
         WHERE participantidentifier = '{participantidentifier}'
-        AND (type = 'blood_presure_diastolic' OR type = 'blood_pressure_systolic')
+        AND (type = 'blood_pressure_diastolic' OR type = 'blood_pressure_systolic')
     ),
     googlefit_bp_days AS (
     SELECT participantidentifier, day_date
