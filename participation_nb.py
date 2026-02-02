@@ -57,7 +57,12 @@ def _(mo):
     - Prenatal Weeks 9 - 19
     - Prenatal Weeks 20 - 30
     - Prenatal Weeks 31 - 40
-    - Postpartum Weeks 1 - 6 (corresponds to gestational weeks 41 - 46)
+    - Postpartum Weeks 1 - 6
+
+    **Postpartum Calculation Logic:**
+    - If participant has `delivery_date` and `postpartum_days` custom fields, postpartum weeks are calculated from the actual delivery date
+    - Week 1 starts on the delivery date, and the period extends for the specified number of postpartum days
+    - If delivery information is not available, falls back to gestational weeks 41-46 (calculated from EDD)
 
     Each stage includes two heatmaps:
 
@@ -127,16 +132,40 @@ def _(participant):
 
 
 @app.cell
+def _(get_participant_delivery_info, mo, participantidentifier, pd):
+    edd_final, delivery_date, postpartum_days = get_participant_delivery_info(participantidentifier)
+    
+    if delivery_date and postpartum_days:
+        postpartum_end = delivery_date + pd.Timedelta(days=postpartum_days)
+        mo.md(f"""
+        **Delivery Information:**
+        - EDD: {edd_final.strftime('%Y-%m-%d') if edd_final else 'Not available'}
+        - Actual Delivery Date: {delivery_date.strftime('%Y-%m-%d')}
+        - Postpartum Period: {postpartum_days} days (until {postpartum_end.strftime('%Y-%m-%d')})
+        - Postpartum weeks will be calculated from actual delivery date
+        """)
+    else:
+        mo.md(f"""
+        **Delivery Information:**
+        - EDD: {edd_final.strftime('%Y-%m-%d') if edd_final else 'Not available'}
+        - Actual Delivery Date: Not available
+        - Postpartum Period: Not specified
+        - Postpartum weeks will be calculated from EDD (gestational weeks 41-46)
+        """)
+    return delivery_date, edd_final, postpartum_days
+
+
+@app.cell
 def _(mo, ring_vendor):
-    mo.md(f"""Ring Vendor: {ring_vendor}""")
+    mo.md(f"""**Ring Vendor:** {ring_vendor}""")
     return
 
 
 @app.cell
 def _(participantidentifier):
-    from stage_calculation import show_heatmap_for_stage, participant_first_w1_day
+    from stage_calculation import show_heatmap_for_stage, participant_first_w1_day, get_participant_delivery_info
     first_w1_day = participant_first_w1_day(participantidentifier)
-    return first_w1_day, show_heatmap_for_stage
+    return first_w1_day, show_heatmap_for_stage, get_participant_delivery_info
 
 
 @app.cell
@@ -219,7 +248,7 @@ def _(
     ring_vendor,
     show_heatmap_for_stage,
 ):
-    stage4_fig_1, stage4_fig_2 = show_heatmap_for_stage(participant_email, participantidentifier, 41, 46, "Postpartum Weeks 1-6 — Weekly Compliance Heatmap", first_w1_day, ring_vendor)
+    stage4_fig_1, stage4_fig_2 = show_heatmap_for_stage(participant_email, participantidentifier, 1, 6, "Postpartum Weeks 1-6 — Weekly Compliance Heatmap", first_w1_day, ring_vendor, is_postpartum=True)
     return stage4_fig_1, stage4_fig_2
 
 

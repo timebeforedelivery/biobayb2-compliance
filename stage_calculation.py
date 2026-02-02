@@ -721,29 +721,70 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     return [int(i) for i in result['meets_2x'].tolist()]
 
 
-def show_heatmap_for_stage(participant_email, participantidentifier, first_week, last_week, title, w1, ring_vendor='uh'):
-    weeks = [f"W{w}" for w in range(first_week, last_week + 1)]
+def show_heatmap_for_stage(participant_email, participantidentifier, first_week, last_week, title, w1, ring_vendor='uh', is_postpartum=False):
+    # Check if this is postpartum and if we have delivery info
+    delivery_info = None
+    if is_postpartum:
+        edd_final, delivery_date, postpartum_days = get_participant_delivery_info(participantidentifier)
+        if delivery_date and postpartum_days:
+            delivery_info = (delivery_date, postpartum_days)
+    
+    if delivery_info and is_postpartum:
+        # Use delivery-based calculations for postpartum
+        delivery_date, postpartum_days = delivery_info
+        weeks = [f"PP W{w}" for w in range(first_week, last_week + 1)]  # PP = PostPartum
+        
+        frame = {
+            "Symptom check-in (daily)": calculate_daily_symptoms_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days),
+            "Daily questions (1-5 Q)": calculate_daily_questions_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days),
+            "Weekly/bimonthly questionnaire": calculate_weekly_bimontly_surveys_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days),
+            "Weight(per week)": calculate_weight_measurements_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days),
+            "BP (per week)": calculate_bp_measurements_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+        }
 
-    frame = {
-        "Symptom check-in (daily)": calculate_daily_symptoms(participantidentifier, first_week, last_week),
-        "Daily questions (1-5 Q)": calculate_daily_questions(participantidentifier, first_week, last_week),
-        "Weekly/bimonthly questionnaire": calculate_weekly_bimontly_surveys(participantidentifier, first_week, last_week),
-        "Weight(per week)": calculate_weight_measurements(participantidentifier, first_week, last_week),
-        "BP (per week)": calculate_bp_measurements(participantidentifier, first_week, last_week)
-    }
-
-    if ring_vendor == 'oura':
-        frame["Oura - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_oura(participantidentifier, first_week, last_week) # from MDH
-    else:
-        if os.getenv('UH_API_CALL'):
-            # Calculate device wear for each week
-            for i, week_num in enumerate(range(first_week, last_week + 1)):
-                # Calculate the start date of the week (w1 is the start of week 1)
-                week_start = w1 + timedelta(days=(week_num - 1) * 7)
-                week_end = week_start + timedelta(days=6)
-                frame["Smart ring wear (~19h/day)"][i] = get_weekly_wear_count(participant_email, week_start, week_end)
+        if ring_vendor == 'oura':
+            frame["Oura - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_oura_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
         else:
-            frame["UH - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh(participantidentifier, w1, first_week, last_week) # UH AWS
+            if os.getenv('UH_API_CALL'):
+                # Calculate device wear for each postpartum week using API
+                week_ranges = calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+                wear_counts = []
+                for week_num, week_start, week_end in week_ranges:
+                    count = get_weekly_wear_count(participant_email, week_start, week_end)
+                    wear_counts.append(count)
+                # Pad with zeros for any missing weeks
+                while len(wear_counts) < (last_week - first_week + 1):
+                    wear_counts.append(0)
+                frame["Smart ring wear (~19h/day)"] = wear_counts
+            else:
+                frame["UH - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+        
+        # Update title to indicate delivery-based calculation
+        title = title.replace("Postpartum", f"Postpartum (from delivery {delivery_date.strftime('%Y-%m-%d')})")
+    else:
+        # Use original gestational week-based calculations
+        weeks = [f"W{w}" for w in range(first_week, last_week + 1)]
+
+        frame = {
+            "Symptom check-in (daily)": calculate_daily_symptoms(participantidentifier, first_week, last_week),
+            "Daily questions (1-5 Q)": calculate_daily_questions(participantidentifier, first_week, last_week),
+            "Weekly/bimonthly questionnaire": calculate_weekly_bimontly_surveys(participantidentifier, first_week, last_week),
+            "Weight(per week)": calculate_weight_measurements(participantidentifier, first_week, last_week),
+            "BP (per week)": calculate_bp_measurements(participantidentifier, first_week, last_week)
+        }
+
+        if ring_vendor == 'oura':
+            frame["Oura - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_oura(participantidentifier, first_week, last_week) # from MDH
+        else:
+            if os.getenv('UH_API_CALL'):
+                # Calculate device wear for each week
+                for i, week_num in enumerate(range(first_week, last_week + 1)):
+                    # Calculate the start date of the week (w1 is the start of week 1)
+                    week_start = w1 + timedelta(days=(week_num - 1) * 7)
+                    week_end = week_start + timedelta(days=6)
+                    frame["Smart ring wear (~19h/day)"][i] = get_weekly_wear_count(participant_email, week_start, week_end)
+            else:
+                frame["UH - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh(participantidentifier, w1, first_week, last_week) # UH AWS
 
     df = pd.DataFrame(frame, index=weeks).T
 
@@ -887,3 +928,493 @@ def participant_first_w1_day(participantidentifier):
     first_w1_day = result['w1'][0]
     format_string = '%Y-%m-%d %H:%M:%S.%f'
     return datetime.strptime(first_w1_day, format_string)
+
+def get_participant_delivery_info(participantidentifier):
+    """Get delivery date and postpartum days from participant custom fields"""
+    query = f"""
+    SELECT
+        participantidentifier,
+        date_parse(
+            json_extract_scalar(cast(customfields AS JSON), '$.edd_final'),
+            '%Y-%m-%d'
+        ) AS edd_final,
+        date_parse(
+            json_extract_scalar(cast(customfields AS JSON), '$.delivery_date'),
+            '%Y-%m-%d'
+        ) AS delivery_date,
+        CAST(json_extract_scalar(cast(customfields AS JSON), '$.postpartum_days') AS integer) AS postpartum_days
+    FROM allparticipants
+    WHERE participantidentifier = '{participantidentifier}'
+    """
+    
+    result = mdh_athena.execQuery(query)
+    if len(result) == 0:
+        return None, None, None
+    
+    row = result.iloc[0]
+    edd_final = row['edd_final']
+    delivery_date = row['delivery_date'] 
+    postpartum_days = float(row['postpartum_days']) if row['postpartum_days'] is not None else None
+    
+    # Convert to datetime objects if not None
+    if edd_final:
+        edd_final = datetime.strptime(str(edd_final), '%Y-%m-%d %H:%M:%S.%f')
+    if delivery_date:
+        delivery_date = datetime.strptime(str(delivery_date), '%Y-%m-%d %H:%M:%S.%f')
+        
+    return edd_final, delivery_date, postpartum_days
+
+def calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days):
+    """Calculate postpartum weeks based on actual delivery date and postpartum_days"""
+    if not delivery_date or not postpartum_days:
+        return None
+    
+    # Calculate the end of the postpartum period
+    postpartum_end_date = delivery_date + timedelta(days=postpartum_days)
+    
+    # For postpartum weeks, week 1 starts on delivery_date
+    # first_week and last_week are postpartum week numbers (1, 2, 3, etc.)
+    week_ranges = []
+    for week_num in range(first_week, last_week + 1):
+        week_start = delivery_date + timedelta(days=(week_num - 1) * 7)
+        week_end = week_start + timedelta(days=6)
+        
+        # Only include weeks that fall within the postpartum period
+        if week_start <= postpartum_end_date:
+            week_ranges.append((week_num, week_start, min(week_end, postpartum_end_date)))
+    
+    return week_ranges
+
+def calculate_daily_symptoms_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days):
+    """Calculate daily symptoms for postpartum period based on delivery date"""
+    week_ranges = calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+    if not week_ranges:
+        return [0] * (last_week - first_week + 1)
+    
+    # Get all symptom check-in dates for the postpartum period
+    postpartum_end_date = delivery_date + timedelta(days=postpartum_days)
+    
+    query = f"""
+    SELECT
+        participantidentifier,
+        CAST(inserteddate AS date) AS day_date
+    FROM projectdevicedata
+    WHERE participantidentifier = '{participantidentifier}'
+        AND CAST(inserteddate AS date) BETWEEN DATE '{delivery_date.date()}'
+        AND DATE '{postpartum_end_date.date()}'
+    GROUP BY 1, 2
+    """
+    
+    result = mdh_athena.execQuery(query)
+    checkin_dates = set()
+    if len(result) > 0:
+        checkin_dates = set(pd.to_datetime(result['day_date']).dt.date)
+    
+    # Count checkins for each week
+    weekly_counts = []
+    for week_num, week_start, week_end in week_ranges:
+        count = 0
+        current_date = week_start.date()
+        while current_date <= week_end.date():
+            if current_date in checkin_dates:
+                count += 1
+            current_date += timedelta(days=1)
+        weekly_counts.append(count)
+    
+    # Pad with zeros for any missing weeks
+    while len(weekly_counts) < (last_week - first_week + 1):
+        weekly_counts.append(0)
+    
+    return weekly_counts
+
+def calculate_daily_questions_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days):
+    """Calculate daily questions for postpartum period based on delivery date"""
+    week_ranges = calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+    if not week_ranges:
+        return [0] * (last_week - first_week + 1)
+    
+    postpartum_end_date = delivery_date + timedelta(days=postpartum_days)
+    
+    query = f"""    
+    WITH ema_results AS (
+        SELECT surveyresultkey, surveyname
+        FROM surveyresults
+        WHERE surveyname IN ('EMA PM', 'EMA AM')
+    ),
+    answers AS (
+    SELECT
+        sqr.participantidentifier,
+        er.surveyname,
+        CAST(sqr.startdate - INTERVAL '7' HOUR AS date) AS day_date,
+        sqr.resultidentifier,
+        sqr.surveyresultkey
+    FROM surveyquestionresults sqr
+    JOIN ema_results er
+        ON er.surveyresultkey = sqr.surveyresultkey
+    WHERE sqr.participantidentifier = '{participantidentifier}'
+        AND CAST(sqr.startdate - INTERVAL '7' HOUR AS date) BETWEEN DATE '{delivery_date.date()}'
+        AND DATE '{postpartum_end_date.date()}'
+    ),
+    day_counts AS (
+    SELECT
+        a.participantidentifier,
+        a.day_date,
+        COUNT(DISTINCT a.resultidentifier) AS questions_answered
+    FROM answers a
+    GROUP BY 1, 2
+    )
+    SELECT
+        participantidentifier,
+        day_date,
+        questions_answered
+    FROM day_counts
+    WHERE questions_answered >= 6
+    ORDER BY day_date
+    """
+    
+    result = mdh_athena.execQuery(query)
+    question_dates = set()
+    if len(result) > 0:
+        question_dates = set(pd.to_datetime(result['day_date']).dt.date)
+    
+    # Count question days for each week
+    weekly_counts = []
+    for week_num, week_start, week_end in week_ranges:
+        count = 0
+        current_date = week_start.date()
+        while current_date <= week_end.date():
+            if current_date in question_dates:
+                count += 1
+            current_date += timedelta(days=1)
+        weekly_counts.append(count)
+    
+    # Pad with zeros for any missing weeks
+    while len(weekly_counts) < (last_week - first_week + 1):
+        weekly_counts.append(0)
+    
+    return weekly_counts
+
+def calculate_weekly_bimontly_surveys_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days):
+    """Calculate weekly/bimonthly surveys for postpartum period based on delivery date"""
+    week_ranges = calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+    if not week_ranges:
+        return [0] * (last_week - first_week + 1)
+    
+    postpartum_end_date = delivery_date + timedelta(days=postpartum_days)
+    
+    query = f"""
+    WITH sr AS (
+    SELECT surveyresultkey, surveyname
+    FROM surveyresults
+    WHERE surveyname IN (
+        -- weekly surveys
+        'mMOS (Weekly)',
+        'PROMIS Sleep (Weekly)',
+        'BRCS (Weekly)',
+        'Pregnancy Experience Scale',
+        -- exception (biomonthly) surveys
+        'Maternal Antenatal Attachment Scale',
+        'Edinburgh Postnatal Depression Scale (EPDS)',
+        'Perinatal Anxiety Screening Scale (PASS)'
+    )
+    ),
+    submissions AS (
+    SELECT
+        sqr.participantidentifier,
+        sr.surveyname,
+        CAST(MIN(sqr.startdate - INTERVAL '7' HOUR) AS date) AS day_date,
+        sqr.surveyresultkey
+    FROM surveyquestionresults sqr
+    JOIN sr
+        ON sr.surveyresultkey = sqr.surveyresultkey
+    WHERE sqr.participantidentifier = '{participantidentifier}'
+        AND CAST(sqr.startdate - INTERVAL '7' HOUR AS date) BETWEEN DATE '{delivery_date.date()}'
+        AND DATE '{postpartum_end_date.date()}'
+    GROUP BY sqr.participantidentifier, sr.surveyname, sqr.surveyresultkey
+    )
+    SELECT
+        participantidentifier,
+        surveyname,
+        day_date
+    FROM submissions
+    ORDER BY day_date
+    """
+    
+    result = mdh_athena.execQuery(query)
+    
+    # Group surveys by date
+    surveys_by_date = {}
+    if len(result) > 0:
+        for _, row in result.iterrows():
+            date = pd.to_datetime(row['day_date']).date()
+            if date not in surveys_by_date:
+                surveys_by_date[date] = set()
+            surveys_by_date[date].add(row['surveyname'])
+    
+    # Count surveys for each week
+    weekly_counts = []
+    for week_num, week_start, week_end in week_ranges:
+        count = 0
+        current_date = week_start.date()
+        while current_date <= week_end.date():
+            if current_date in surveys_by_date:
+                count += len(surveys_by_date[current_date])
+            current_date += timedelta(days=1)
+        weekly_counts.append(min(count, 1))  # Cap at 1 per week
+    
+    # Pad with zeros for any missing weeks
+    while len(weekly_counts) < (last_week - first_week + 1):
+        weekly_counts.append(0)
+    
+    return weekly_counts
+
+def calculate_weight_measurements_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days):
+    """Calculate weight measurements for postpartum period based on delivery date"""
+    week_ranges = calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+    if not week_ranges:
+        return [0] * (last_week - first_week + 1)
+    
+    postpartum_end_date = delivery_date + timedelta(days=postpartum_days)
+    
+    query = f"""
+    WITH googlefit_wt_src AS (
+        SELECT
+            participantidentifier,
+            CAST(COALESCE(windowstart - INTERVAL '7' HOUR) AS date) AS day_date
+        FROM googlefitsamples
+        WHERE participantidentifier = '{participantidentifier}'
+        AND type = 'Weight'
+        AND CAST(COALESCE(windowstart - INTERVAL '7' HOUR) AS date) BETWEEN DATE '{delivery_date.date()}'
+        AND DATE '{postpartum_end_date.date()}'
+    ),
+    googlefit_wt_days AS (
+        SELECT participantidentifier, day_date
+        FROM googlefit_wt_src
+        GROUP BY 1, 2
+    ),
+    wt_src AS (
+    SELECT
+        participantidentifier,
+        CAST(COALESCE(startdate - INTERVAL '7' HOUR) AS date) AS day_date
+    FROM healthkitv2samples
+    WHERE participantidentifier = '{participantidentifier}'
+        AND type = 'Weight'
+        AND CAST(COALESCE(startdate - INTERVAL '7' HOUR) AS date) BETWEEN DATE '{delivery_date.date()}'
+        AND DATE '{postpartum_end_date.date()}'
+    ),
+    wt_days AS (
+    SELECT participantidentifier, day_date
+    FROM wt_src
+    GROUP BY 1, 2
+    ),
+    all_weight_days AS (
+        SELECT participantidentifier, day_date FROM googlefit_wt_days
+        UNION
+        SELECT participantidentifier, day_date FROM wt_days
+    )
+    SELECT
+        participantidentifier,
+        day_date
+    FROM all_weight_days
+    ORDER BY day_date
+    """
+    
+    result = mdh_athena.execQuery(query)
+    weight_dates = set()
+    if len(result) > 0:
+        weight_dates = set(pd.to_datetime(result['day_date']).dt.date)
+    
+    # Count weight measurements for each week
+    weekly_counts = []
+    for week_num, week_start, week_end in week_ranges:
+        count = 0
+        current_date = week_start.date()
+        while current_date <= week_end.date():
+            if current_date in weight_dates:
+                count += 1
+            current_date += timedelta(days=1)
+        weekly_counts.append(count)
+    
+    # Pad with zeros for any missing weeks
+    while len(weekly_counts) < (last_week - first_week + 1):
+        weekly_counts.append(0)
+    
+    return weekly_counts
+
+def calculate_bp_measurements_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days):
+    """Calculate BP measurements for postpartum period based on delivery date"""
+    week_ranges = calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+    if not week_ranges:
+        return [0] * (last_week - first_week + 1)
+    
+    postpartum_end_date = delivery_date + timedelta(days=postpartum_days)
+    
+    query = f"""
+    WITH bp_src AS (
+    SELECT
+        participantidentifier,
+        CAST(COALESCE(datetimelocal, datetime, inserteddate) AS date) AS day_date
+    FROM omronbloodpressure
+    WHERE participantidentifier = '{participantidentifier}'
+        AND CAST(COALESCE(datetimelocal, datetime, inserteddate) AS date) BETWEEN DATE '{delivery_date.date()}'
+        AND DATE '{postpartum_end_date.date()}'
+    ),
+    bp_days AS (
+    SELECT participantidentifier, day_date
+    FROM bp_src
+    GROUP BY 1, 2
+    ),
+    googlefit_bp_src AS (
+        SELECT
+            participantidentifier,
+            CAST(COALESCE(windowstart - INTERVAL '7' HOUR) AS date) AS day_date
+        FROM googlefitsamples
+        WHERE participantidentifier = '{participantidentifier}'
+        AND (type = 'blood_pressure_diastolic' OR type = 'blood_pressure_systolic')
+        AND CAST(COALESCE(windowstart - INTERVAL '7' HOUR) AS date) BETWEEN DATE '{delivery_date.date()}'
+        AND DATE '{postpartum_end_date.date()}'
+    ),
+    googlefit_bp_days AS (
+    SELECT participantidentifier, day_date
+    FROM googlefit_bp_src
+    GROUP BY 1, 2
+    ),
+    wt_src AS (
+    SELECT
+        participantidentifier,
+        CAST(COALESCE(startdate - INTERVAL '7' HOUR) AS date) AS day_date
+    FROM healthkitv2samples
+    WHERE participantidentifier = '{participantidentifier}'
+        AND (type = 'BloodPressureSystolic' OR type = 'BloodPressureDiastolic')
+        AND CAST(COALESCE(startdate - INTERVAL '7' HOUR) AS date) BETWEEN DATE '{delivery_date.date()}'
+        AND DATE '{postpartum_end_date.date()}'
+    ),
+    wt_days AS (
+    SELECT participantidentifier, day_date
+    FROM wt_src
+    GROUP BY 1, 2
+    ),
+    all_bp_days AS (
+        SELECT participantidentifier, day_date FROM bp_days
+        UNION
+        SELECT participantidentifier, day_date FROM googlefit_bp_days
+        UNION
+        SELECT participantidentifier, day_date FROM wt_days
+    )
+    SELECT
+        participantidentifier,
+        day_date
+    FROM all_bp_days
+    ORDER BY day_date
+    """
+    
+    result = mdh_athena.execQuery(query)
+    bp_dates = set()
+    if len(result) > 0:
+        bp_dates = set(pd.to_datetime(result['day_date']).dt.date)
+    
+    # Count BP measurements for each week
+    weekly_counts = []
+    for week_num, week_start, week_end in week_ranges:
+        count = 0
+        current_date = week_start.date()
+        while current_date <= week_end.date():
+            if current_date in bp_dates:
+                count += 1
+            current_date += timedelta(days=1)
+        weekly_counts.append(count)
+    
+    # Pad with zeros for any missing weeks
+    while len(weekly_counts) < (last_week - first_week + 1):
+        weekly_counts.append(0)
+    
+    return weekly_counts
+
+def calculate_daily_wear_from_oura_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days):
+    """Calculate Oura ring wear for postpartum period based on delivery date"""
+    week_ranges = calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+    if not week_ranges:
+        return [0] * (last_week - first_week + 1)
+    
+    postpartum_end_date = delivery_date + timedelta(days=postpartum_days)
+    
+    query = f"""
+    SELECT
+        participantidentifier,
+        CAST("timestamp" AS date) AS day_date,
+        -- Clamp to [0,1] and ensure floating math
+        GREATEST(0.0, LEAST(1.0, 1.0 - CAST(COALESCE(nonweartime, 0) AS DOUBLE) / 86400.0)) AS wear_fraction
+    FROM ouradailyactivity
+    WHERE participantidentifier = '{participantidentifier}'
+        AND CAST("timestamp" AS date) BETWEEN DATE '{delivery_date.date()}'
+        AND DATE '{postpartum_end_date.date()}'
+    """
+    
+    result = mdh_athena.execQuery(query)
+    wear_days = set()
+    if len(result) > 0:
+        for _, row in result.iterrows():
+            if row['wear_fraction'] >= 0.75:
+                wear_days.add(pd.to_datetime(row['day_date']).date())
+    
+    # Count wear days for each week
+    weekly_counts = []
+    for week_num, week_start, week_end in week_ranges:
+        count = 0
+        current_date = week_start.date()
+        while current_date <= week_end.date():
+            if current_date in wear_days:
+                count += 1
+            current_date += timedelta(days=1)
+        weekly_counts.append(count)
+    
+    # Pad with zeros for any missing weeks
+    while len(weekly_counts) < (last_week - first_week + 1):
+        weekly_counts.append(0)
+    
+    return weekly_counts
+
+def calculate_daily_wear_from_uh_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days):
+    """Calculate UH ring wear for postpartum period based on delivery date"""
+    week_ranges = calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+    if not week_ranges:
+        return [0] * (last_week - first_week + 1)
+    
+    postpartum_end_date = delivery_date + timedelta(days=postpartum_days)
+    
+    query = f"""
+    SELECT
+        pid,
+        CAST(from_iso8601_timestamp(object_day_start_timestamp_iso8601_tz) AS date) AS day_date,
+        COUNT(DISTINCT object_values_timestamp) AS samples_in_day
+    FROM temp
+    WHERE pid = '{participantidentifier}'
+        AND object_day_start_timestamp_iso8601_tz IS NOT NULL
+        AND CAST(from_iso8601_timestamp(object_day_start_timestamp_iso8601_tz) AS date) BETWEEN DATE '{delivery_date.date()}'
+        AND DATE '{postpartum_end_date.date()}'
+    GROUP BY 1, 2
+    """
+    
+    result = aws_athena.execQuery(query)
+    wear_days = set()
+    if len(result) > 0:
+        for _, row in result.iterrows():
+            if row['samples_in_day'] >= 0.75 * 288:  # 75% of 288 samples per day
+                wear_days.add(pd.to_datetime(row['day_date']).date())
+    
+    # Count wear days for each week
+    weekly_counts = []
+    for week_num, week_start, week_end in week_ranges:
+        count = 0
+        current_date = week_start.date()
+        while current_date <= week_end.date():
+            if current_date in wear_days:
+                count += 1
+            current_date += timedelta(days=1)
+        weekly_counts.append(count)
+    
+    # Pad with zeros for any missing weeks
+    while len(weekly_counts) < (last_week - first_week + 1):
+        weekly_counts.append(0)
+    
+    return weekly_counts
