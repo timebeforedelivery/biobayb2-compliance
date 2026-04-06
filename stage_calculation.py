@@ -763,28 +763,36 @@ def show_heatmap_for_stage(participant_email, participantidentifier, first_week,
         title = title.replace("Postpartum", f"Postpartum (from delivery {delivery_date.strftime('%Y-%m-%d')})")
     else:
         # Use original gestational week-based calculations
-        weeks = [f"W{w}" for w in range(first_week, last_week + 1)]
+        if is_postpartum:
+            # Convert postpartum weeks to gestational weeks (postpartum week 1 = gestational week 43)
+            ga_first_week = first_week + 42
+            ga_last_week = last_week + 42
+            weeks = [f"PP W{w}" for w in range(first_week, last_week + 1)]
+        else:
+            ga_first_week = first_week
+            ga_last_week = last_week
+            weeks = [f"W{w}" for w in range(first_week, last_week + 1)]
 
         frame = {
-            "Symptom check-in (daily)": calculate_daily_symptoms(participantidentifier, first_week, last_week),
-            "Daily questions (1-5 Q)": calculate_daily_questions(participantidentifier, first_week, last_week),
-            "Weekly/bimonthly questionnaire": calculate_weekly_bimontly_surveys(participantidentifier, first_week, last_week),
-            "Weight(per week)": calculate_weight_measurements(participantidentifier, first_week, last_week),
-            "BP (per week)": calculate_bp_measurements(participantidentifier, first_week, last_week)
+            "Symptom check-in (daily)": calculate_daily_symptoms(participantidentifier, ga_first_week, ga_last_week),
+            "Daily questions (1-5 Q)": calculate_daily_questions(participantidentifier, ga_first_week, ga_last_week),
+            "Weekly/bimonthly questionnaire": calculate_weekly_bimontly_surveys(participantidentifier, ga_first_week, ga_last_week),
+            "Weight(per week)": calculate_weight_measurements(participantidentifier, ga_first_week, ga_last_week),
+            "BP (per week)": calculate_bp_measurements(participantidentifier, ga_first_week, ga_last_week)
         }
 
         if ring_vendor == 'oura':
-            frame["Oura - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_oura(participantidentifier, first_week, last_week) # from MDH
+            frame["Oura - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_oura(participantidentifier, ga_first_week, ga_last_week) # from MDH
         else:
             if os.getenv('UH_API_CALL'):
                 # Calculate device wear for each week
-                for i, week_num in enumerate(range(first_week, last_week + 1)):
+                for i, week_num in enumerate(range(ga_first_week, ga_last_week + 1)):
                     # Calculate the start date of the week (w1 is the start of week 1)
                     week_start = w1 + timedelta(days=(week_num - 1) * 7)
                     week_end = week_start + timedelta(days=6)
                     frame["Smart ring wear (~19h/day)"][i] = get_weekly_wear_count(participant_email, week_start, week_end)
             else:
-                frame["UH - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh(participantidentifier, w1, first_week, last_week) # UH AWS
+                frame["UH - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh(participantidentifier, w1, ga_first_week, ga_last_week) # UH AWS
 
     df = pd.DataFrame(frame, index=weeks).T
 

@@ -56,13 +56,13 @@ def _(mo):
 
     - Prenatal Weeks 9 - 19
     - Prenatal Weeks 20 - 30
-    - Prenatal Weeks 31 - 40
+    - Prenatal Weeks 31 - 42
     - Postpartum Weeks 1 - 6
 
     **Postpartum Calculation Logic:**
     - If participant has `delivery_date` and `postpartum_days` custom fields, postpartum weeks are calculated from the actual delivery date
     - Week 1 starts on the delivery date, and the period extends for the specified number of postpartum days
-    - If delivery information is not available, falls back to gestational weeks 41-46 (calculated from EDD)
+    - If delivery information is not available, falls back to gestational weeks 43-48 (calculated from EDD + 42 weeks)
 
     Each stage includes two heatmaps:
 
@@ -150,7 +150,7 @@ def _(get_participant_delivery_info, mo, participantidentifier, pd):
         - EDD: {edd_final.strftime('%Y-%m-%d') if edd_final else 'Not available'}
         - Actual Delivery Date: Not available
         - Postpartum Period: Not specified
-        - Postpartum weeks will be calculated from EDD (gestational weeks 41-46)
+        - Postpartum weeks will be calculated from EDD (gestational weeks 43-48)
         """)
     return delivery_date, edd_final, postpartum_days
 
@@ -224,7 +224,7 @@ def _(
     ring_vendor,
     show_heatmap_for_stage,
 ):
-    stage3_fig_1, stage3_fig_2 = show_heatmap_for_stage(participant_email, participantidentifier, 31, 40, "Prenatal Weeks 31-40 — Weekly Compliance Heatmap", first_w1_day, ring_vendor)
+    stage3_fig_1, stage3_fig_2 = show_heatmap_for_stage(participant_email, participantidentifier, 31, 42, "Prenatal Weeks 31-42 — Weekly Compliance Heatmap", first_w1_day, ring_vendor)
     return stage3_fig_1, stage3_fig_2
 
 
