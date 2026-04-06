@@ -944,13 +944,17 @@ def get_participant_delivery_info(participantidentifier):
     row = result.iloc[0]
     edd_final = row['edd_final']
     delivery_date = row['delivery_date'] 
-    postpartum_days = float(row['postpartum_days']) if row['postpartum_days'] is not None else None
+    postpartum_days = float(row['postpartum_days']) if row['postpartum_days'] is not None and str(row['postpartum_days']) != 'nan' else None
     
-    # Convert to datetime objects if not None
-    if edd_final:
+    # Convert to datetime objects if not None/NaT
+    if edd_final is not None and str(edd_final) not in ('None', 'NaT', 'nan', ''):
         edd_final = datetime.strptime(str(edd_final), '%Y-%m-%d %H:%M:%S.%f')
-    if delivery_date:
+    else:
+        edd_final = None
+    if delivery_date is not None and str(delivery_date) not in ('None', 'NaT', 'nan', ''):
         delivery_date = datetime.strptime(str(delivery_date), '%Y-%m-%d %H:%M:%S.%f')
+    else:
+        delivery_date = None
         
     return edd_final, delivery_date, postpartum_days
 
