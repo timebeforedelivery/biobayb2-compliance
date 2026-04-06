@@ -168,8 +168,9 @@ def _(first_w1_day, get_current_gestational_week, get_delivery_week, get_partici
 
 
 @app.cell
-def _(mo, ring_vendor):
-    mo.md(f"""**Ring Vendor:** {ring_vendor}""")
+def _(delivery_date, mo, ring_vendor):
+    delivery_info = f" | Delivery Date: {delivery_date.strftime('%Y-%m-%d')}" if delivery_date else ""
+    mo.md(f"""**Ring Vendor:** {ring_vendor}{delivery_info}""")
     return
 
 
