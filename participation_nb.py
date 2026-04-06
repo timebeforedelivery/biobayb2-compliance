@@ -8,7 +8,19 @@ app = marimo.App(width="medium")
 def _():
 
     import marimo as mo
-    return (mo,)
+    import io
+    import base64
+
+    def fig_to_image(fig):
+        """Convert a matplotlib figure to a static mo.image for reliable rendering."""
+        if fig is None:
+            return mo.md("")
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', bbox_inches='tight', dpi=150)
+        buf.seek(0)
+        return mo.image(buf.read(), width=1100)
+
+    return fig_to_image, mo
 
 
 @app.cell
@@ -16,7 +28,7 @@ def _():
     from sensorfabric.mdh import MDH
     import pandas as pd
     import os
-    return MDH, pd
+    return MDH, os, pd
 
 
 @app.cell
@@ -26,7 +38,7 @@ def _(MDH):
 
 
 @app.cell
-def _(mdh):
+def _(mdh, os):
     segmentID = os.getenv('MDH_SEGMENT_ID') # segment ID of enrolled participants
     all_participants_data = mdh.getAllParticipants({'segmentID': segmentID})
     return (all_participants_data,)
@@ -132,9 +144,16 @@ def _(participant):
 
 
 @app.cell
-def _(first_w1_day, get_current_gestational_week, get_delivery_week, get_participant_delivery_info, mo, participantidentifier, pd):
+def _(
+    first_w1_day,
+    get_current_gestational_week,
+    get_delivery_week,
+    get_participant_delivery_info,
+    mo,
+    participantidentifier,
+):
     edd_final, delivery_date, postpartum_days = get_participant_delivery_info(participantidentifier)
-    
+
     if delivery_date:
         delivery_week = get_delivery_week(first_w1_day, delivery_date)
         # Stage 3 ends at delivery week or 40, whichever is smaller
@@ -142,7 +161,7 @@ def _(first_w1_day, get_current_gestational_week, get_delivery_week, get_partici
         # If delivery is after week 40, we need an extra prenatal stage for W41 through delivery week
         stage3_extended_last_week = delivery_week if delivery_week > 40 else None
         has_postpartum = True
-        
+
         mo.md(f"""
         **Delivery Information:**
         - EDD: {edd_final.strftime('%Y-%m-%d') if edd_final else 'Not available'}
@@ -156,7 +175,7 @@ def _(first_w1_day, get_current_gestational_week, get_delivery_week, get_partici
         stage3_extended_last_week = current_week if current_week > 40 else None
         has_postpartum = False
         delivery_week = None
-        
+
         mo.md(f"""
         **Delivery Information:**
         - EDD: {edd_final.strftime('%Y-%m-%d') if edd_final else 'Not available'}
@@ -164,7 +183,13 @@ def _(first_w1_day, get_current_gestational_week, get_delivery_week, get_partici
         - Currently at gestational week {current_week}
         - Prenatal tracking continues past W40 until delivery date is recorded
         """)
-    return delivery_date, edd_final, has_postpartum, postpartum_days, stage3_extended_last_week, stage3_last_week
+    return (
+        delivery_date,
+        has_postpartum,
+        postpartum_days,
+        stage3_extended_last_week,
+        stage3_last_week,
+    )
 
 
 @app.cell
@@ -178,7 +203,13 @@ def _(delivery_date, mo, ring_vendor):
 def _(participantidentifier):
     from stage_calculation import show_heatmap_for_stage, participant_first_w1_day, get_participant_delivery_info, get_delivery_week, get_current_gestational_week
     first_w1_day = participant_first_w1_day(participantidentifier)
-    return first_w1_day, show_heatmap_for_stage, get_participant_delivery_info, get_delivery_week, get_current_gestational_week
+    return (
+        first_w1_day,
+        get_current_gestational_week,
+        get_delivery_week,
+        get_participant_delivery_info,
+        show_heatmap_for_stage,
+    )
 
 
 @app.cell
@@ -194,14 +225,14 @@ def _(
 
 
 @app.cell
-def _(mo, stage1_fig_1):
-    mo.mpl.interactive(stage1_fig_1)
+def _(fig_to_image, stage1_fig_1):
+    fig_to_image(stage1_fig_1)
     return
 
 
 @app.cell
-def _(mo, stage1_fig_2):
-    mo.mpl.interactive(stage1_fig_2)
+def _(fig_to_image, stage1_fig_2):
+    fig_to_image(stage1_fig_2)
     return
 
 
@@ -218,14 +249,14 @@ def _(
 
 
 @app.cell
-def _(mo, stage2_fig_1):
-    mo.mpl.interactive(stage2_fig_1)
+def _(fig_to_image, stage2_fig_1):
+    fig_to_image(stage2_fig_1)
     return
 
 
 @app.cell
-def _(mo, stage2_fig_2):
-    mo.mpl.interactive(stage2_fig_2)
+def _(fig_to_image, stage2_fig_2):
+    fig_to_image(stage2_fig_2)
     return
 
 
@@ -243,14 +274,14 @@ def _(
 
 
 @app.cell
-def _(mo, stage3_fig_1):
-    mo.mpl.interactive(stage3_fig_1)
+def _(fig_to_image, stage3_fig_1):
+    fig_to_image(stage3_fig_1)
     return
 
 
 @app.cell
-def _(mo, stage3_fig_2):
-    mo.mpl.interactive(stage3_fig_2)
+def _(fig_to_image, stage3_fig_2):
+    fig_to_image(stage3_fig_2)
     return
 
 
@@ -291,40 +322,26 @@ def _(
 
 
 @app.cell
-def _(mo, stage4_ext_fig_1):
-    if stage4_ext_fig_1:
-        mo.mpl.interactive(stage4_ext_fig_1)
+def _(fig_to_image, stage4_ext_fig_1):
+    fig_to_image(stage4_ext_fig_1)
     return
 
 
 @app.cell
-def _(mo, stage4_ext_fig_2):
-    if stage4_ext_fig_2:
-        mo.mpl.interactive(stage4_ext_fig_2)
+def _(fig_to_image, stage4_ext_fig_2):
+    fig_to_image(stage4_ext_fig_2)
     return
 
 
 @app.cell
-def _(mo, stage4_fig_1):
-    if stage4_fig_1:
-        mo.mpl.interactive(stage4_fig_1)
+def _(fig_to_image, stage4_fig_1):
+    fig_to_image(stage4_fig_1)
     return
 
 
 @app.cell
-def _(mo, stage4_fig_2):
-    if stage4_fig_2:
-        mo.mpl.interactive(stage4_fig_2)
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
+def _(fig_to_image, stage4_fig_2):
+    fig_to_image(stage4_fig_2)
     return
 
 
