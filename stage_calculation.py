@@ -721,48 +721,38 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     return [int(i) for i in result['meets_2x'].tolist()]
 
 
-def show_heatmap_for_stage(participant_email, participantidentifier, first_week, last_week, title, w1, ring_vendor='uh', is_postpartum=False):
-    # Check if this is postpartum and if we have delivery info
-    delivery_info = None
-    if is_postpartum:
-        edd_final, delivery_date, postpartum_days = get_participant_delivery_info(participantidentifier)
-        if delivery_date and postpartum_days:
-            delivery_info = (delivery_date, postpartum_days)
-    
-    if delivery_info and is_postpartum:
+def show_heatmap_for_stage(participant_email, participantidentifier, first_week, last_week, title, w1, ring_vendor='uh', is_postpartum=False, delivery_date=None, postpartum_days=None):
+    if is_postpartum and delivery_date:
         # Use delivery-based calculations for postpartum
-        delivery_date, postpartum_days = delivery_info
-        weeks = [f"PP W{w}" for w in range(first_week, last_week + 1)]  # PP = PostPartum
+        pp_days = postpartum_days if postpartum_days else 42  # default 6 weeks
+        weeks = [f"PP W{w}" for w in range(first_week, last_week + 1)]
         
         frame = {
-            "Symptom check-in (daily)": calculate_daily_symptoms_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days),
-            "Daily questions (1-5 Q)": calculate_daily_questions_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days),
-            "Weekly/bimonthly questionnaire": calculate_weekly_bimontly_surveys_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days),
-            "Weight(per week)": calculate_weight_measurements_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days),
-            "BP (per week)": calculate_bp_measurements_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+            "Symptom check-in (daily)": calculate_daily_symptoms_postpartum(participantidentifier, first_week, last_week, delivery_date, pp_days),
+            "Daily questions (1-5 Q)": calculate_daily_questions_postpartum(participantidentifier, first_week, last_week, delivery_date, pp_days),
+            "Weekly/bimonthly questionnaire": calculate_weekly_bimontly_surveys_postpartum(participantidentifier, first_week, last_week, delivery_date, pp_days),
+            "Weight(per week)": calculate_weight_measurements_postpartum(participantidentifier, first_week, last_week, delivery_date, pp_days),
+            "BP (per week)": calculate_bp_measurements_postpartum(participantidentifier, first_week, last_week, delivery_date, pp_days)
         }
 
         if ring_vendor == 'oura':
-            frame["Oura - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_oura_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+            frame["Oura - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_oura_postpartum(participantidentifier, first_week, last_week, delivery_date, pp_days)
         else:
             if os.getenv('UH_API_CALL'):
-                # Calculate device wear for each postpartum week using API
-                week_ranges = calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+                week_ranges = calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, pp_days)
                 wear_counts = []
                 for week_num, week_start, week_end in week_ranges:
                     count = get_weekly_wear_count(participant_email, week_start, week_end)
                     wear_counts.append(count)
-                # Pad with zeros for any missing weeks
                 while len(wear_counts) < (last_week - first_week + 1):
                     wear_counts.append(0)
                 frame["Smart ring wear (~19h/day)"] = wear_counts
             else:
-                frame["UH - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh_postpartum(participantidentifier, first_week, last_week, delivery_date, postpartum_days)
+                frame["UH - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh_postpartum(participantidentifier, first_week, last_week, delivery_date, pp_days)
         
-        # Update title to indicate delivery-based calculation
         title = title.replace("Postpartum", f"Postpartum (from delivery {delivery_date.strftime('%Y-%m-%d')})")
     else:
-        # Use original gestational week-based calculations
+        # Prenatal gestational week-based calculations
         weeks = [f"W{w}" for w in range(first_week, last_week + 1)]
 
         frame = {
@@ -774,17 +764,15 @@ def show_heatmap_for_stage(participant_email, participantidentifier, first_week,
         }
 
         if ring_vendor == 'oura':
-            frame["Oura - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_oura(participantidentifier, first_week, last_week) # from MDH
+            frame["Oura - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_oura(participantidentifier, first_week, last_week)
         else:
             if os.getenv('UH_API_CALL'):
-                # Calculate device wear for each week
                 for i, week_num in enumerate(range(first_week, last_week + 1)):
-                    # Calculate the start date of the week (w1 is the start of week 1)
                     week_start = w1 + timedelta(days=(week_num - 1) * 7)
                     week_end = week_start + timedelta(days=6)
                     frame["Smart ring wear (~19h/day)"][i] = get_weekly_wear_count(participant_email, week_start, week_end)
             else:
-                frame["UH - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh(participantidentifier, w1, first_week, last_week) # UH AWS
+                frame["UH - Smart ring wear (~19h/day)"] = calculate_daily_wear_from_uh(participantidentifier, w1, first_week, last_week)
 
     df = pd.DataFrame(frame, index=weeks).T
 
@@ -925,7 +913,9 @@ def participant_first_w1_day(participantidentifier):
     """
 
     result = mdh_athena.execQuery(first_date_final_edd_query)
-    first_w1_day = result['w1'][0]
+    if len(result) == 0:
+        raise ValueError(f"No edd_final found for participant '{participantidentifier}'. Cannot calculate W1 date.")
+    first_w1_day = result['w1'].iloc[0]
     format_string = '%Y-%m-%d %H:%M:%S.%f'
     return datetime.strptime(first_w1_day, format_string)
 
@@ -963,6 +953,16 @@ def get_participant_delivery_info(participantidentifier):
         delivery_date = datetime.strptime(str(delivery_date), '%Y-%m-%d %H:%M:%S.%f')
         
     return edd_final, delivery_date, postpartum_days
+
+def get_delivery_week(first_w1_day, delivery_date):
+    """Calculate the gestational week number when delivery occurred."""
+    days_since_w1 = (delivery_date - first_w1_day).days
+    return 1 + days_since_w1 // 7
+
+def get_current_gestational_week(first_w1_day):
+    """Calculate the current gestational week number based on today's date."""
+    days_since_w1 = (datetime.today() - first_w1_day).days
+    return 1 + days_since_w1 // 7
 
 def calculate_postpartum_weeks_from_delivery(participantidentifier, first_week, last_week, delivery_date, postpartum_days):
     """Calculate postpartum weeks based on actual delivery date and postpartum_days"""
