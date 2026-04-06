@@ -34,16 +34,17 @@ def calculate_daily_wear_from_oura(participantidentifier, first_week, last_week)
     WITH edd AS (
     SELECT
         participantidentifier,
-        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final,
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.delivery_date'), '%Y-%m-%d') AS delivery_date
     FROM allparticipants
     WHERE participantidentifier = '{participantidentifier}'
     ),
     w1 AS (
     SELECT
         participantidentifier,
-        CAST(edd_final AS date) - INTERVAL '280' DAY AS w1_date
+        CAST(COALESCE(delivery_date, edd_final) AS date) - INTERVAL '294' DAY AS w1_date
     FROM edd
-    WHERE edd_final IS NOT NULL
+    WHERE COALESCE(delivery_date, edd_final) IS NOT NULL
     ),
     oura_days AS (
     SELECT
@@ -231,16 +232,17 @@ def calculate_daily_symptoms(participantidentifier, first_week, last_week):
     WITH edd AS (
     SELECT
         participantidentifier,
-        date_parse(json_extract_scalar(cast(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final
+        date_parse(json_extract_scalar(cast(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final,
+        date_parse(json_extract_scalar(cast(customfields AS JSON), '$.delivery_date'), '%Y-%m-%d') AS delivery_date
     FROM allparticipants
     WHERE participantidentifier = '{participantidentifier}'
     ),
     w1 AS (
     SELECT
         participantidentifier,
-        CAST(edd_final AS date) - INTERVAL '280' DAY AS w1_date
+        CAST(COALESCE(delivery_date, edd_final) AS date) - INTERVAL '294' DAY AS w1_date
     FROM edd
-    WHERE edd_final IS NOT NULL
+    WHERE COALESCE(delivery_date, edd_final) IS NOT NULL
     ),
     calendar_days AS (
     SELECT
@@ -304,16 +306,17 @@ def calculate_daily_questions(participantidentifier, first_week, last_week):
     edd AS (
     SELECT
         participantidentifier,
-        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final,
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.delivery_date'), '%Y-%m-%d') AS delivery_date
     FROM allparticipants
     WHERE participantidentifier = '{participantidentifier}'
     ),
     w1 AS (
     SELECT
         participantidentifier,
-        CAST(edd_final AS date) - INTERVAL '280' DAY AS w1_date
+        CAST(COALESCE(delivery_date, edd_final) AS date) - INTERVAL '294' DAY AS w1_date
     FROM edd
-    WHERE edd_final IS NOT NULL
+    WHERE COALESCE(delivery_date, edd_final) IS NOT NULL
     ),
     day_counts AS (
     SELECT
@@ -395,16 +398,17 @@ def calculate_weekly_bimontly_surveys(participantidentifier, first_week, last_we
     edd AS (
     SELECT
         participantidentifier,
-        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final,
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.delivery_date'), '%Y-%m-%d') AS delivery_date
     FROM allparticipants
     WHERE participantidentifier = '{participantidentifier}'
     ),
     w1 AS (
     SELECT
         participantidentifier,
-        CAST(edd_final AS date) - INTERVAL '280' DAY AS w1_date
+        CAST(COALESCE(delivery_date, edd_final) AS date) - INTERVAL '294' DAY AS w1_date
     FROM edd
-    WHERE edd_final IS NOT NULL
+    WHERE COALESCE(delivery_date, edd_final) IS NOT NULL
     ),
     -- Map each submission to gestational week
     submissions_with_weeks AS (
@@ -508,16 +512,17 @@ def calculate_weight_measurements(participantidentifier, first_week, last_week):
     edd AS (
     SELECT
         participantidentifier,
-        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final,
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.delivery_date'), '%Y-%m-%d') AS delivery_date
     FROM allparticipants
     WHERE participantidentifier = '{participantidentifier}'
     ),
     w1 AS (
     SELECT
         participantidentifier,
-        CAST(edd_final AS date) - INTERVAL '280' DAY AS w1_date
+        CAST(COALESCE(delivery_date, edd_final) AS date) - INTERVAL '294' DAY AS w1_date
     FROM edd
-    WHERE edd_final IS NOT NULL
+    WHERE COALESCE(delivery_date, edd_final) IS NOT NULL
     ),
 
     bp_with_weeks AS (
@@ -637,16 +642,17 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     edd AS (
     SELECT
         participantidentifier,
-        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final,
+        DATE_PARSE(JSON_EXTRACT_SCALAR(CAST(customfields AS JSON), '$.delivery_date'), '%Y-%m-%d') AS delivery_date
     FROM allparticipants
     WHERE participantidentifier = '{participantidentifier}'
     ),
     w1 AS (
     SELECT
         participantidentifier,
-        CAST(edd_final AS date) - INTERVAL '280' DAY AS w1_date
+        CAST(COALESCE(delivery_date, edd_final) AS date) - INTERVAL '294' DAY AS w1_date
     FROM edd
-    WHERE edd_final IS NOT NULL
+    WHERE COALESCE(delivery_date, edd_final) IS NOT NULL
     ),
 
     bp_with_weeks AS (
@@ -917,23 +923,30 @@ def participant_first_w1_day(participantidentifier):
         date_parse(
             json_extract_scalar(cast(customfields AS JSON), '$.edd_final'),
             '%Y-%m-%d'
-        ) edd_final
+        ) edd_final,
+        date_parse(
+            json_extract_scalar(cast(customfields AS JSON), '$.delivery_date'),
+            '%Y-%m-%d'
+        ) delivery_date
         FROM
         allparticipants
         WHERE participantidentifier = '{participantidentifier}'
     )
     SELECT
     participantidentifier,
-    edd_final - interval '280' day w1,
-    edd_final
+    COALESCE(delivery_date, edd_final) - interval '294' day w1,
+    edd_final,
+    delivery_date
     FROM
     edd
     WHERE
-    edd_final IS NOT NULL
+    COALESCE(delivery_date, edd_final) IS NOT NULL
     """
 
     result = mdh_athena.execQuery(first_date_final_edd_query)
-    first_w1_day = result['w1'][0]
+    if len(result) == 0:
+        raise ValueError(f"No edd_final or delivery_date found for participant '{participantidentifier}'. Cannot calculate W1 date.")
+    first_w1_day = result['w1'].iloc[0]
     format_string = '%Y-%m-%d %H:%M:%S.%f'
     return datetime.strptime(first_w1_day, format_string)
 
