@@ -52,17 +52,17 @@ def _(mo):
 
     ## Stages
 
-    We show four stages of participation:
+    We show participation stages dynamically based on delivery status:
 
     - Prenatal Weeks 9 - 19
     - Prenatal Weeks 20 - 30
-    - Prenatal Weeks 31 - 42
-    - Postpartum Weeks 1 - 6
+    - Prenatal Weeks 31 - 40 (or up to delivery week if premature)
+    - If delivery_date exists and delivery was after week 40: extended Prenatal Weeks 41+ through delivery week, then Postpartum Weeks 1-6 from delivery date
+    - If delivery_date exists and delivery was at or before week 40: Postpartum Weeks 1-6 from delivery date
+    - If no delivery_date: Prenatal continues past week 40 up to the current week (no postpartum shown)
 
-    **Postpartum Calculation Logic:**
-    - If participant has `delivery_date` and `postpartum_days` custom fields, postpartum weeks are calculated from the actual delivery date
-    - Week 1 starts on the delivery date, and the period extends for the specified number of postpartum days
-    - If delivery information is not available, falls back to gestational weeks 43-48 (calculated from EDD + 42 weeks)
+    **Prenatal W1 Calculation:**
+    - W1 always starts at EDD - 280 days (40 weeks before estimated due date)
 
     Each stage includes two heatmaps:
 
@@ -132,27 +132,39 @@ def _(participant):
 
 
 @app.cell
-def _(get_participant_delivery_info, mo, participantidentifier, pd):
+def _(first_w1_day, get_current_gestational_week, get_delivery_week, get_participant_delivery_info, mo, participantidentifier, pd):
     edd_final, delivery_date, postpartum_days = get_participant_delivery_info(participantidentifier)
     
-    if delivery_date and postpartum_days:
-        postpartum_end = delivery_date + pd.Timedelta(days=postpartum_days)
+    if delivery_date:
+        delivery_week = get_delivery_week(first_w1_day, delivery_date)
+        # Stage 3 ends at delivery week or 40, whichever is smaller
+        stage3_last_week = min(40, delivery_week)
+        # If delivery is after week 40, we need an extra prenatal stage for W41 through delivery week
+        stage3_extended_last_week = delivery_week if delivery_week > 40 else None
+        has_postpartum = True
+        
         mo.md(f"""
         **Delivery Information:**
         - EDD: {edd_final.strftime('%Y-%m-%d') if edd_final else 'Not available'}
-        - Actual Delivery Date: {delivery_date.strftime('%Y-%m-%d')}
-        - Postpartum Period: {postpartum_days} days (until {postpartum_end.strftime('%Y-%m-%d')})
-        - Postpartum weeks will be calculated from actual delivery date
+        - Actual Delivery Date: {delivery_date.strftime('%Y-%m-%d')} (gestational week {delivery_week})
+        - Postpartum: 6 weeks from delivery date
         """)
     else:
+        current_week = get_current_gestational_week(first_w1_day)
+        stage3_last_week = 40
+        # No delivery — prenatal continues past W40 up to current week
+        stage3_extended_last_week = current_week if current_week > 40 else None
+        has_postpartum = False
+        delivery_week = None
+        
         mo.md(f"""
         **Delivery Information:**
         - EDD: {edd_final.strftime('%Y-%m-%d') if edd_final else 'Not available'}
         - Actual Delivery Date: Not available
-        - Postpartum Period: Not specified
-        - Postpartum weeks will be calculated from EDD (gestational weeks 43-48)
+        - Currently at gestational week {current_week}
+        - Prenatal tracking continues past W40 until delivery date is recorded
         """)
-    return delivery_date, edd_final, postpartum_days
+    return delivery_date, edd_final, has_postpartum, postpartum_days, stage3_extended_last_week, stage3_last_week
 
 
 @app.cell
@@ -163,9 +175,9 @@ def _(mo, ring_vendor):
 
 @app.cell
 def _(participantidentifier):
-    from stage_calculation import show_heatmap_for_stage, participant_first_w1_day, get_participant_delivery_info
+    from stage_calculation import show_heatmap_for_stage, participant_first_w1_day, get_participant_delivery_info, get_delivery_week, get_current_gestational_week
     first_w1_day = participant_first_w1_day(participantidentifier)
-    return first_w1_day, show_heatmap_for_stage, get_participant_delivery_info
+    return first_w1_day, show_heatmap_for_stage, get_participant_delivery_info, get_delivery_week, get_current_gestational_week
 
 
 @app.cell
@@ -223,8 +235,9 @@ def _(
     participantidentifier,
     ring_vendor,
     show_heatmap_for_stage,
+    stage3_last_week,
 ):
-    stage3_fig_1, stage3_fig_2 = show_heatmap_for_stage(participant_email, participantidentifier, 31, 42, "Prenatal Weeks 31-42 — Weekly Compliance Heatmap", first_w1_day, ring_vendor)
+    stage3_fig_1, stage3_fig_2 = show_heatmap_for_stage(participant_email, participantidentifier, 31, stage3_last_week, f"Prenatal Weeks 31-{stage3_last_week} — Weekly Compliance Heatmap", first_w1_day, ring_vendor)
     return stage3_fig_1, stage3_fig_2
 
 
@@ -242,25 +255,65 @@ def _(mo, stage3_fig_2):
 
 @app.cell
 def _(
+    delivery_date,
     first_w1_day,
+    has_postpartum,
     participant_email,
     participantidentifier,
+    postpartum_days,
     ring_vendor,
     show_heatmap_for_stage,
+    stage3_extended_last_week,
 ):
-    stage4_fig_1, stage4_fig_2 = show_heatmap_for_stage(participant_email, participantidentifier, 1, 6, "Postpartum Weeks 1-6 — Weekly Compliance Heatmap", first_w1_day, ring_vendor, is_postpartum=True)
-    return stage4_fig_1, stage4_fig_2
+    stage4_fig_1 = None
+    stage4_fig_2 = None
+    stage4_ext_fig_1 = None
+    stage4_ext_fig_2 = None
+
+    if stage3_extended_last_week and stage3_extended_last_week >= 41:
+        # Show extended prenatal weeks (W41 through delivery week or current week)
+        stage4_ext_fig_1, stage4_ext_fig_2 = show_heatmap_for_stage(
+            participant_email, participantidentifier, 41, stage3_extended_last_week,
+            f"Prenatal Weeks 41-{stage3_extended_last_week} — Weekly Compliance Heatmap",
+            first_w1_day, ring_vendor
+        )
+
+    if has_postpartum and delivery_date:
+        # Show postpartum 6 weeks from delivery_date
+        stage4_fig_1, stage4_fig_2 = show_heatmap_for_stage(
+            participant_email, participantidentifier, 1, 6,
+            "Postpartum Weeks 1-6 — Weekly Compliance Heatmap",
+            first_w1_day, ring_vendor, is_postpartum=True,
+            delivery_date=delivery_date, postpartum_days=postpartum_days
+        )
+    return stage4_ext_fig_1, stage4_ext_fig_2, stage4_fig_1, stage4_fig_2
+
+
+@app.cell
+def _(mo, stage4_ext_fig_1):
+    if stage4_ext_fig_1:
+        mo.mpl.interactive(stage4_ext_fig_1)
+    return
+
+
+@app.cell
+def _(mo, stage4_ext_fig_2):
+    if stage4_ext_fig_2:
+        mo.mpl.interactive(stage4_ext_fig_2)
+    return
 
 
 @app.cell
 def _(mo, stage4_fig_1):
-    mo.mpl.interactive(stage4_fig_1)
+    if stage4_fig_1:
+        mo.mpl.interactive(stage4_fig_1)
     return
 
 
 @app.cell
 def _(mo, stage4_fig_2):
-    mo.mpl.interactive(stage4_fig_2)
+    if stage4_fig_2:
+        mo.mpl.interactive(stage4_fig_2)
     return
 
 
