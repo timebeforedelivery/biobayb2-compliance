@@ -1358,7 +1358,7 @@ def calculate_daily_wear_from_oura_postpartum(participantidentifier, first_week,
     wear_days = set()
     if len(result) > 0:
         for _, row in result.iterrows():
-            if row['wear_fraction'] >= 0.75:
+            if float(row['wear_fraction']) >= 0.75:
                 wear_days.add(pd.to_datetime(row['day_date']).date())
     
     # Count wear days for each week
@@ -1403,7 +1403,7 @@ def calculate_daily_wear_from_uh_postpartum(participantidentifier, first_week, l
     wear_days = set()
     if len(result) > 0:
         for _, row in result.iterrows():
-            if row['samples_in_day'] >= 0.75 * 288:  # 75% of 288 samples per day
+            if float(row['samples_in_day']) >= 0.75 * 288:  # 75% of 288 samples per day
                 wear_days.add(pd.to_datetime(row['day_date']).date())
     
     # Count wear days for each week
