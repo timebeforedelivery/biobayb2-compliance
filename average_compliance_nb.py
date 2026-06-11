@@ -715,6 +715,62 @@ def _(build_average_heatmap, fig_to_image, participant_ids_sql):
 
 
 @app.cell
+def _(fig_to_image, mdh_athena, mo, np, participant_ids_sql, plt):
+    mo.md("## Ring Wear — Daily Hours Distribution (All Participants)")
+    return
+
+
+@app.cell
+def _(fig_to_image, mdh_athena, mo, np, participant_ids_sql, plt):
+    # Query all daily wear hours across all participants
+    ring_hist_query = f"""
+    WITH edd AS (
+        SELECT
+            participantidentifier,
+            date_parse(json_extract_scalar(cast(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final
+        FROM allparticipants
+        WHERE participantidentifier IN ({participant_ids_sql})
+            AND json_extract_scalar(cast(customfields AS JSON), '$.edd_final') IS NOT NULL
+            AND json_extract_scalar(cast(customfields AS JSON), '$.edd_final') != ''
+    ),
+    oura_days AS (
+        SELECT
+            participantidentifier,
+            CAST("timestamp" AS date) AS day_date,
+            GREATEST(0.0, LEAST(1.0, 1.0 - CAST(COALESCE(nonweartime, 0) AS DOUBLE) / 86400.0)) * 24.0 AS wear_hours
+        FROM ouradailyactivity
+        WHERE participantidentifier IN ({participant_ids_sql})
+            AND CAST("timestamp" AS date) <= CURRENT_DATE
+    )
+    SELECT
+        od.participantidentifier,
+        od.day_date,
+        od.wear_hours
+    FROM oura_days od
+    JOIN edd e ON e.participantidentifier = od.participantidentifier
+    WHERE od.wear_hours > 0
+    """
+    ring_hist_data = mdh_athena.execQuery(ring_hist_query)
+
+    _hist_output = mo.md("*No ring wear data available.*")
+    if len(ring_hist_data) > 0:
+        hours = ring_hist_data['wear_hours'].astype(float).values
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.hist(hours, bins=48, range=(0, 24), color='steelblue', edgecolor='white', alpha=0.85)
+        ax.axvline(x=18, color='red', linestyle='--', linewidth=1.5, label='Target: 18h')
+        ax.axvline(x=np.median(hours), color='orange', linestyle='-', linewidth=1.5, label=f'Median: {np.median(hours):.1f}h')
+        ax.set_xlabel("Daily Wear (hours)")
+        ax.set_ylabel("Number of Days")
+        ax.set_title(f"Ring Wear Hours Distribution — All Participants ({len(hours):,} days)")
+        ax.set_xlim(0, 24)
+        ax.legend()
+        plt.tight_layout()
+        _hist_output = fig_to_image(fig)
+    _hist_output
+    return
+
+
+@app.cell
 def _():
     return
 
