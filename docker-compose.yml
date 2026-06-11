@@ -23,5 +23,31 @@ services:
       # persist cache & live-edit your scripts from host & aws creds
       - ./.cache:/app/.cache
       - ./participation_nb.py:/app/participation_nb.py
+      - ./average_compliance_nb.py:/app/average_compliance_nb.py
+      - ./stage_calculation.py:/app/stage_calculation.py
+      - ~/.aws:/root/.aws:ro
+
+  marimo-average:
+    build: .
+    ports:
+      - "2719:2718"
+    command: ["python", "-m", "marimo", "run", "/app/average_compliance_nb.py", "--host", "0.0.0.0", "--port", "2718"]
+    environment:
+      - UHKEY=${UHKEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - MDH_SECRET_KEY=${MDH_SECRET_KEY}
+      - MDH_ACCOUNT_NAME=${MDH_ACCOUNT_NAME}
+      - MDH_SECRET_KEY=${MDH_SECRET_KEY}
+      - MDH_PROJECT_NAME=${MDH_PROJECT_NAME}
+      - MDH_PROJECT_ID=${MDH_PROJECT_ID}
+      - AWS_PROFILE_NAME=${AWS_PROFILE_NAME}
+      - UH_API_CALL=${UH_API_CALL}
+      - SEGMENT_ID=${MDH_SEGMENT_ID}
+      - AWS_BIOBAYB_DB_NAME=${AWS_BIOBAYB_DB_NAME}
+      - AWS_BIOBAYB_S3_LOCATION=${AWS_BIOBAYB_S3_LOCATION}
+      - AWS_BIOBAYB_WORKGROUP=${AWS_BIOBAYB_WORKGROUP}
+    volumes:
+      - ./.cache:/app/.cache
+      - ./average_compliance_nb.py:/app/average_compliance_nb.py
       - ./stage_calculation.py:/app/stage_calculation.py
       - ~/.aws:/root/.aws:ro
