@@ -594,11 +594,6 @@ def _(fig_to_image, get_avg_bp, get_avg_daily_questions, get_avg_daily_symptoms,
         df.loc["Self Report Average"] = self_report_average
         df.loc["Biometrics Average"] = biometrics_average
 
-        # Annotations
-        annot_pct = df.copy().astype(str)
-        for row_name in df.index:
-            annot_pct.loc[row_name] = df.loc[row_name].map(lambda v: f"{v:.1f}%")
-
         # Ring wear hours data for separate heatmap
         def extract_hours(result_df, num_weeks):
             hours = [0.0] * num_weeks
@@ -621,6 +616,17 @@ def _(fig_to_image, get_avg_bp, get_avg_daily_questions, get_avg_daily_symptoms,
                 week_idx = int(float(row['week'])) - first_week
                 if 0 <= week_idx < num_weeks:
                     n_row[week_idx] = int(row['n_participants'])
+
+        # Add participant count as a row in the main heatmap
+        df.loc["N Participants"] = n_row
+
+        # Update annotations to include participant count
+        annot_pct = df.copy().astype(str)
+        for row_name in df.index:
+            if row_name == "N Participants":
+                annot_pct.loc[row_name] = df.loc[row_name].map(lambda v: f"{int(v)}")
+            else:
+                annot_pct.loc[row_name] = df.loc[row_name].map(lambda v: f"{v:.1f}%")
 
         # Plot with two subplots: percentage heatmap + hours heatmap
         n_pct_rows = len(df)
@@ -650,6 +656,13 @@ def _(fig_to_image, get_avg_bp, get_avg_daily_questions, get_avg_daily_symptoms,
         except ValueError:
             pass
 
+        # Bold separator before N Participants
+        try:
+            sep_y2 = list(df.index).index("N Participants")
+            ax_pct.hlines(sep_y2, *ax_pct.get_xlim(), colors="black", linewidth=2.8)
+        except ValueError:
+            pass
+
         # Hours heatmap (ring wear) with Blues colormap
         sns.heatmap(
             df_hours,
@@ -661,13 +674,6 @@ def _(fig_to_image, get_avg_bp, get_avg_daily_questions, get_avg_daily_symptoms,
         )
         ax_hours.set_ylabel("")
         ax_hours.set_yticklabels(ax_hours.get_yticklabels(), rotation=0)
-
-        # Participant count note
-        fig.text(
-            0.5, 0.001,
-            f"Participant counts per week: min={min(n_row)}, max={max(n_row)}",
-            ha="center", va="bottom", fontsize=9, fontstyle="italic"
-        )
 
         plt.tight_layout()
         return fig
