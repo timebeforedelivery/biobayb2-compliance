@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy your notebooks/scripts
 COPY participation_nb.py /app/participation_nb.py
+COPY average_compliance_nb.py /app/average_compliance_nb.py
 COPY stage_calculation.py /app/stage_calculation.py
 
 # Persist on container filesystem
