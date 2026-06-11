@@ -775,6 +775,7 @@ def _(fig_to_image, mdh_athena, mo, np, participant_ids_sql, plt):
         ax.hist(hours, bins=48, range=(0, 24), color='steelblue', edgecolor='white', alpha=0.85)
         ax.axvline(x=18, color='red', linestyle='--', linewidth=1.5, label='Target: 18h')
         ax.axvline(x=np.median(hours), color='orange', linestyle='-', linewidth=1.5, label=f'Median: {np.median(hours):.1f}h')
+        ax.axvline(x=np.mean(hours), color='green', linestyle='-.', linewidth=1.5, label=f'Mean: {np.mean(hours):.1f}h')
         ax.set_xlabel("Daily Wear (hours)")
         ax.set_ylabel("Number of Days")
         ax.set_title(f"Ring Wear Hours Distribution ({len(hours):,} total days | {days_without_data:,} days with 0h wear)")
