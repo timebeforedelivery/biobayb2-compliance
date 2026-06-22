@@ -302,7 +302,6 @@ def _(
     stage4_ext_fig_2 = None
 
     if stage3_extended_last_week and stage3_extended_last_week >= 41:
-        # Show extended prenatal weeks (W41 through delivery week or current week)
         stage4_ext_fig_1, stage4_ext_fig_2 = show_heatmap_for_stage(
             participant_email, participantidentifier, 41, stage3_extended_last_week,
             f"Prenatal Weeks 41-{stage3_extended_last_week} — Weekly Compliance Heatmap",
@@ -310,7 +309,6 @@ def _(
         )
 
     if has_postpartum and delivery_date:
-        # Show postpartum 6 weeks from delivery_date
         stage4_fig_1, stage4_fig_2 = show_heatmap_for_stage(
             participant_email, participantidentifier, 1, 6,
             "Postpartum Weeks 1-6 — Weekly Compliance Heatmap",
