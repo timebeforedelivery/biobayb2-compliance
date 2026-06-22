@@ -29,14 +29,14 @@ def _():
 @app.cell
 def _():
     from sensorfabric.mdh import MDH
-    from sensorfabric.needle import Needle
-    return MDH, Needle
+    from query_cache import CachedNeedle
+    return MDH, CachedNeedle
 
 
 @app.cell
-def _(MDH, Needle):
+def _(MDH, CachedNeedle):
     mdh = MDH()
-    mdh_athena = Needle(method="mdh")
+    mdh_athena = CachedNeedle(method="mdh")
     return mdh, mdh_athena
 
 

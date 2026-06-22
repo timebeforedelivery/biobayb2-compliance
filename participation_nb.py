@@ -19,7 +19,6 @@ def _():
         fig.savefig(buf, format='png', bbox_inches='tight', dpi=150)
         buf.seek(0)
         return mo.image(buf.read(), width=1100)
-
     return fig_to_image, mo
 
 
@@ -28,7 +27,7 @@ def _():
     from sensorfabric.mdh import MDH
     import pandas as pd
     import os
-    return MDH, os, pd
+    return MDH, pd
 
 
 @app.cell
