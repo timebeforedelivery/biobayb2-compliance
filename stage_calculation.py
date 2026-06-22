@@ -8,24 +8,22 @@ import requests
 import os
 from datetime import datetime, timedelta
 from sensorfabric.mdh import MDH
-from sensorfabric.needle import Needle
 from urllib.parse import urlencode
 import hashlib
 import json
 from pathlib import Path
-from sensorfabric.athena import athena
+from query_cache import CachedNeedle, CachedAthena
 
 
 mdh = MDH()
 
-mdh_athena = Needle(method="mdh")
+mdh_athena = CachedNeedle(method="mdh")
 
-aws_athena = aws = athena(
+aws_athena = aws = CachedAthena(
     profile_name=os.getenv("AWS_PROFILE_NAME"),
     database=os.getenv('AWS_BIOBAYB_DB_NAME'),
     s3_location=os.getenv('AWS_BIOBAYB_S3_LOCATION'),
     workgroup=os.getenv('AWS_BIOBAYB_WORKGROUP'),
-    offlineCache=False,
 )
 
 

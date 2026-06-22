@@ -4,6 +4,7 @@ services:
     build: .
     ports:
       - "2718:2718"
+    command: ["python", "-m", "marimo", "run", "/app/participation_nb.py", "--host", "0.0.0.0", "--port", "2718"]
     environment:
       # Pass through any creds/tokens you need
       - UHKEY=${UHKEY}
