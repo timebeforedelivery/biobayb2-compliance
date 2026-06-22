@@ -27,6 +27,33 @@ aws_athena = aws = CachedAthena(
 )
 
 
+def get_ttl_for_weeks(first_w1_day, last_week):
+    """
+    Determine cache TTL based on whether the queried weeks are in the past.
+
+    If the last week in the range has already fully passed (its end date < today),
+    cache permanently (return None). Otherwise use a 30-minute TTL.
+
+    Args:
+        first_w1_day: datetime — the participant's W1 start date
+        last_week: int — the last gestational week being queried
+
+    Returns:
+        None for permanent cache, or 1800 (seconds) for current/future data.
+    """
+    if first_w1_day is None:
+        return 1800
+    # End of last_week = w1 + (last_week * 7) - 1 day
+    last_week_end = first_w1_day + timedelta(days=last_week * 7 - 1)
+    if last_week_end.date() < datetime.today().date():
+        return None  # All weeks are in the past — cache forever
+    return 1800  # Current or future — 30 min TTL
+
+
+# Module-level TTL used by query functions. Set by show_heatmap_for_stage before calling checks.
+_current_ttl = 1800
+
+
 def calculate_daily_wear_from_oura(participantidentifier, first_week, last_week):
     query = f"""
     WITH edd AS (
@@ -97,7 +124,7 @@ def calculate_daily_wear_from_oura(participantidentifier, first_week, last_week)
     AND ws.week = w.week
     ORDER BY w.week
     """
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     return [int(i) for i in result['wear_days_ge_75'].tolist()]
 
 def calculate_daily_wear_from_uh(participantidentifier, first_w1_day, first_week, last_week):
@@ -164,7 +191,7 @@ def calculate_daily_wear_from_uh(participantidentifier, first_w1_day, first_week
     AND ws.week = w.week
     ORDER BY w.week
     """
-    result = aws_athena.execQuery(query)
+    result = aws_athena.execQuery(query, ttl_seconds=_current_ttl)
     return [int(i) for i in result['wear_days_ge_75'].tolist()]
 
 # Device wear percentage detection
@@ -277,7 +304,7 @@ def calculate_daily_symptoms(participantidentifier, first_week, last_week):
     GROUP BY 1, 2
     ORDER BY week;
     """
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     return [int(i) for i in result['days_with_checkin'].tolist()]
 
 def calculate_daily_questions(participantidentifier, first_week, last_week):
@@ -357,7 +384,7 @@ def calculate_daily_questions(participantidentifier, first_week, last_week):
     AND wc.week = w.week
     ORDER BY w.week;
     """
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     return [int(i) for i in result['days_with_5q'].tolist()]
 
 
@@ -456,7 +483,7 @@ def calculate_weekly_bimontly_surveys(participantidentifier, first_week, last_we
     AND wf.week = w.week
     ORDER BY w.week;
     """
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     return [int(i) for i in result['weekly_completed_count'].tolist()]
 
 
@@ -586,7 +613,7 @@ def calculate_weight_measurements(participantidentifier, first_week, last_week):
     AND gw.week = w.week
     ORDER BY w.week;
     """
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     return [int(i) for i in result['meets_2x'].tolist()]
 
 def calculate_bp_measurements(participantidentifier, first_week, last_week):
@@ -715,11 +742,15 @@ def calculate_bp_measurements(participantidentifier, first_week, last_week):
     AND gb.week = w.week
     ORDER BY w.week;
     """
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     return [int(i) for i in result['meets_2x'].tolist()]
 
 
 def show_heatmap_for_stage(participant_email, participantidentifier, first_week, last_week, title, w1, ring_vendor='uh', is_postpartum=False, delivery_date=None, postpartum_days=None):
+    global _current_ttl
+    # Set TTL: past weeks cached forever, current week uses 30 min TTL
+    _current_ttl = get_ttl_for_weeks(w1, last_week)
+
     if is_postpartum and delivery_date:
         # Use delivery-based calculations for postpartum
         pp_days = postpartum_days if postpartum_days else 42  # default 6 weeks
@@ -910,7 +941,7 @@ def participant_first_w1_day(participantidentifier):
     edd_final IS NOT NULL
     """
 
-    result = mdh_athena.execQuery(first_date_final_edd_query)
+    result = mdh_athena.execQuery(first_date_final_edd_query, ttl_seconds=None)
     if len(result) == 0:
         raise ValueError(f"No edd_final found for participant '{participantidentifier}'. Cannot calculate W1 date.")
     first_w1_day = result['w1'].iloc[0]
@@ -935,7 +966,7 @@ def get_participant_delivery_info(participantidentifier):
     WHERE participantidentifier = '{participantidentifier}'
     """
     
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     if len(result) == 0:
         return None, None, None
     
@@ -1007,7 +1038,7 @@ def calculate_daily_symptoms_postpartum(participantidentifier, first_week, last_
     GROUP BY 1, 2
     """
     
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     checkin_dates = set()
     if len(result) > 0:
         checkin_dates = set(pd.to_datetime(result['day_date']).dt.date)
@@ -1074,7 +1105,7 @@ def calculate_daily_questions_postpartum(participantidentifier, first_week, last
     ORDER BY day_date
     """
     
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     question_dates = set()
     if len(result) > 0:
         question_dates = set(pd.to_datetime(result['day_date']).dt.date)
@@ -1142,7 +1173,7 @@ def calculate_weekly_bimontly_surveys_postpartum(participantidentifier, first_we
     ORDER BY day_date
     """
     
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     
     # Group surveys by date
     surveys_by_date = {}
@@ -1221,7 +1252,7 @@ def calculate_weight_measurements_postpartum(participantidentifier, first_week, 
     ORDER BY day_date
     """
     
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     weight_dates = set()
     if len(result) > 0:
         weight_dates = set(pd.to_datetime(result['day_date']).dt.date)
@@ -1310,7 +1341,7 @@ def calculate_bp_measurements_postpartum(participantidentifier, first_week, last
     ORDER BY day_date
     """
     
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     bp_dates = set()
     if len(result) > 0:
         bp_dates = set(pd.to_datetime(result['day_date']).dt.date)
@@ -1352,7 +1383,7 @@ def calculate_daily_wear_from_oura_postpartum(participantidentifier, first_week,
         AND DATE '{postpartum_end_date.date()}'
     """
     
-    result = mdh_athena.execQuery(query)
+    result = mdh_athena.execQuery(query, ttl_seconds=_current_ttl)
     wear_days = set()
     if len(result) > 0:
         for _, row in result.iterrows():
@@ -1397,7 +1428,7 @@ def calculate_daily_wear_from_uh_postpartum(participantidentifier, first_week, l
     GROUP BY 1, 2
     """
     
-    result = aws_athena.execQuery(query)
+    result = aws_athena.execQuery(query, ttl_seconds=_current_ttl)
     wear_days = set()
     if len(result) > 0:
         for _, row in result.iterrows():
