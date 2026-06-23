@@ -682,6 +682,81 @@ def _(fig_to_image, get_avg_bp, get_avg_daily_questions, get_avg_daily_symptoms,
 
 
 @app.cell
+def _(fig_to_image, mdh_athena, mo, np, participant_ids_sql, plt):
+    def build_stage_distribution(first_week, last_week, title, participant_ids_sql):
+        """Build a ring wear hours distribution histogram for a specific stage (GA week range), including 0h for days with no data."""
+        query = f"""
+        WITH edd AS (
+            SELECT
+                participantidentifier,
+                date_parse(json_extract_scalar(cast(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final
+            FROM allparticipants
+            WHERE participantidentifier IN ({participant_ids_sql})
+                AND json_extract_scalar(cast(customfields AS JSON), '$.edd_final') IS NOT NULL
+                AND json_extract_scalar(cast(customfields AS JSON), '$.edd_final') != ''
+        ),
+        w1 AS (
+            SELECT
+                participantidentifier,
+                CAST(edd_final AS date) - INTERVAL '280' DAY AS w1_date
+            FROM edd
+            WHERE edd_final IS NOT NULL
+        ),
+        expected_days AS (
+            SELECT
+                w.participantidentifier,
+                d AS day_date
+            FROM w1 w
+            CROSS JOIN UNNEST(
+                SEQUENCE(
+                    date_add('day', 7 * ({first_week} - 1), w.w1_date),
+                    date_add('day', 7 * {last_week} - 1, w.w1_date),
+                    INTERVAL '1' DAY
+                )
+            ) AS t(d)
+            WHERE d <= CURRENT_DATE
+        ),
+        oura_days AS (
+            SELECT
+                participantidentifier,
+                CAST("timestamp" AS date) AS day_date,
+                GREATEST(0.0, LEAST(1.0, 1.0 - CAST(COALESCE(nonweartime, 0) AS DOUBLE) / 86400.0)) * 24.0 AS wear_hours
+            FROM ouradailyactivity
+            WHERE participantidentifier IN ({participant_ids_sql})
+        )
+        SELECT
+            COALESCE(od.wear_hours, 0.0) AS wear_hours
+        FROM expected_days ed
+        LEFT JOIN oura_days od
+            ON od.participantidentifier = ed.participantidentifier
+            AND od.day_date = ed.day_date
+        """
+        result = mdh_athena.execQuery(query)
+
+        if len(result) == 0:
+            return None
+
+        hours = result['wear_hours'].astype(float).values
+        days_with_data = (hours > 0).sum()
+        days_without_data = (hours == 0).sum()
+
+        fig, ax = plt.subplots(figsize=(10, 3))
+        ax.hist(hours, bins=48, range=(0, 24), color='steelblue', edgecolor='white', alpha=0.85)
+        ax.axvline(x=18, color='red', linestyle='--', linewidth=1.5, label='Target: 18h')
+        ax.axvline(x=np.median(hours), color='orange', linestyle='-', linewidth=1.5, label=f'Median: {np.median(hours):.1f}h')
+        ax.axvline(x=np.mean(hours), color='green', linestyle='-.', linewidth=1.5, label=f'Mean: {np.mean(hours):.1f}h')
+        ax.set_xlabel("Daily Wear (hours)")
+        ax.set_ylabel("Days")
+        ax.set_title(f"{title} ({len(hours):,} total days | {days_without_data:,} with 0h)")
+        ax.set_xlim(0, 24)
+        ax.legend(fontsize=8)
+        plt.tight_layout()
+        return fig
+
+    return (build_stage_distribution,)
+
+
+@app.cell
 def _(build_average_heatmap, fig_to_image, mo):
     mo.md("## Stage 1: Prenatal Weeks 9-19")
     return
@@ -691,6 +766,13 @@ def _(build_average_heatmap, fig_to_image, mo):
 def _(build_average_heatmap, fig_to_image, participant_ids_sql):
     stage1_avg_fig = build_average_heatmap(9, 19, "Average Compliance (%) — Prenatal Weeks 9-19", participant_ids_sql)
     fig_to_image(stage1_avg_fig)
+    return
+
+
+@app.cell
+def _(build_stage_distribution, fig_to_image, participant_ids_sql):
+    _fig = build_stage_distribution(9, 19, "Ring Wear Distribution — W9-19", participant_ids_sql)
+    fig_to_image(_fig)
     return
 
 
@@ -708,6 +790,13 @@ def _(build_average_heatmap, fig_to_image, participant_ids_sql):
 
 
 @app.cell
+def _(build_stage_distribution, fig_to_image, participant_ids_sql):
+    _fig = build_stage_distribution(20, 30, "Ring Wear Distribution — W20-30", participant_ids_sql)
+    fig_to_image(_fig)
+    return
+
+
+@app.cell
 def _(build_average_heatmap, fig_to_image, mo):
     mo.md("## Stage 3: Prenatal Weeks 31-40")
     return
@@ -721,6 +810,13 @@ def _(build_average_heatmap, fig_to_image, participant_ids_sql):
 
 
 @app.cell
+def _(build_stage_distribution, fig_to_image, participant_ids_sql):
+    _fig = build_stage_distribution(31, 40, "Ring Wear Distribution — W31-40", participant_ids_sql)
+    fig_to_image(_fig)
+    return
+
+
+@app.cell
 def _(fig_to_image, mdh_athena, mo, np, participant_ids_sql, plt):
     mo.md("## Ring Wear — Daily Hours Distribution (All Participants)")
     return
@@ -728,24 +824,37 @@ def _(fig_to_image, mdh_athena, mo, np, participant_ids_sql, plt):
 
 @app.cell
 def _(fig_to_image, mdh_athena, mo, np, participant_ids_sql, plt):
-    # Query all daily wear hours, including 0 for days with no data since first Oura day
+    # Query all daily wear hours, including 0 for expected days from W9 to today
     ring_hist_query = f"""
-    WITH first_oura_day AS (
+    WITH edd AS (
         SELECT
             participantidentifier,
-            MIN(CAST("timestamp" AS date)) AS first_day
-        FROM ouradailyactivity
+            date_parse(json_extract_scalar(cast(customfields AS JSON), '$.edd_final'), '%Y-%m-%d') AS edd_final
+        FROM allparticipants
         WHERE participantidentifier IN ({participant_ids_sql})
-        GROUP BY 1
+            AND json_extract_scalar(cast(customfields AS JSON), '$.edd_final') IS NOT NULL
+            AND json_extract_scalar(cast(customfields AS JSON), '$.edd_final') != ''
+    ),
+    w1 AS (
+        SELECT
+            participantidentifier,
+            CAST(edd_final AS date) - INTERVAL '280' DAY AS w1_date
+        FROM edd
+        WHERE edd_final IS NOT NULL
     ),
     expected_days AS (
         SELECT
-            f.participantidentifier,
+            w.participantidentifier,
             d AS day_date
-        FROM first_oura_day f
+        FROM w1 w
         CROSS JOIN UNNEST(
-            SEQUENCE(f.first_day, CURRENT_DATE, INTERVAL '1' DAY)
+            SEQUENCE(
+                date_add('day', 7 * (9 - 1), w.w1_date),
+                date_add('day', 7 * 40 - 1, w.w1_date),
+                INTERVAL '1' DAY
+            )
         ) AS t(d)
+        WHERE d <= CURRENT_DATE
     ),
     oura_days AS (
         SELECT
@@ -756,7 +865,6 @@ def _(fig_to_image, mdh_athena, mo, np, participant_ids_sql, plt):
         WHERE participantidentifier IN ({participant_ids_sql})
     )
     SELECT
-        ed.day_date,
         COALESCE(od.wear_hours, 0.0) AS wear_hours
     FROM expected_days ed
     LEFT JOIN oura_days od
@@ -778,7 +886,7 @@ def _(fig_to_image, mdh_athena, mo, np, participant_ids_sql, plt):
         ax.axvline(x=np.mean(hours), color='green', linestyle='-.', linewidth=1.5, label=f'Mean: {np.mean(hours):.1f}h')
         ax.set_xlabel("Daily Wear (hours)")
         ax.set_ylabel("Number of Days")
-        ax.set_title(f"Ring Wear Hours Distribution ({len(hours):,} total days | {days_without_data:,} days with 0h wear)")
+        ax.set_title(f"Ring Wear Hours Distribution — All Stages W9-40 ({len(hours):,} total days | {days_without_data:,} with 0h)")
         ax.set_xlim(0, 24)
         ax.legend()
         plt.tight_layout()
